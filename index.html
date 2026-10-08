@@ -236,6 +236,7 @@ details li{margin:4px 0}
         <div class="radio-row">
           <label class="check"><input type="radio" name="k-tipe" value="OUT" checked> Penjualan / kirim</label>
           <label class="check"><input type="radio" name="k-tipe" value="WRITE_OFF"> Rusak, expired, tester, konten <span class="badge">admin</span></label>
+          <label class="check"><input type="radio" name="k-tipe" value="ADJUST"> Koreksi stok (kurangi) <span class="badge">admin</span></label>
         </div>
         <div class="grid g2">
           <label class="f">Nomor resi / referensi <input type="text" id="k-ref" placeholder="scan barcode resi, atau ketik" autocomplete="off"></label>
@@ -261,10 +262,11 @@ details li{margin:4px 0}
         <div class="radio-row">
           <label class="check"><input type="radio" name="m-tipe" value="IN" checked> Dari pabrik / supplier</label>
           <label class="check"><input type="radio" name="m-tipe" value="RETURN"> Retur pelanggan (masuk karantina)</label>
+          <label class="check"><input type="radio" name="m-tipe" value="ADJUST"> Koreksi stok (tambah) <span class="badge">admin</span></label>
         </div>
         <div class="grid g2">
           <label class="f"><span id="m-ref-label">Nomor surat jalan</span> <input type="text" id="m-ref" placeholder="mis. SJ/EFBA/2026/10/012" autocomplete="off"></label>
-          <label class="f" id="m-catatan-wrap" hidden>Kondisi / catatan (wajib untuk retur) <input type="text" id="m-catatan" placeholder="mis. segel utuh, kemasan penyok" autocomplete="off"></label>
+          <label class="f" id="m-catatan-wrap" hidden><span id="m-catatan-label">Kondisi / catatan (wajib)</span> <input type="text" id="m-catatan" placeholder="mis. segel utuh, kemasan penyok" autocomplete="off"></label>
         </div>
         <div class="scanbox"><input type="text" id="m-scan" placeholder="Scan produk…" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="btn" data-cam="masuk">Kamera</button></div>
         <div id="m-form" class="card" hidden style="background:var(--surface-2)">
@@ -762,7 +764,7 @@ function tambahKeluar(sku, qty){
 function kMsg(msg, err){ $('k-msg').innerHTML = msg ? '<div class="note ' + (err ? 'danger' : 'ok') + '">' + esc(msg) + '</div>' : ''; }
 function renderKeluar(){
   var K = state.keluar, body = $('k-body'), total = 0, tipe = kTipe();
-  $('k-alasan-wrap').hidden = tipe !== 'WRITE_OFF';
+  $('k-alasan-wrap').hidden = !(tipe === 'WRITE_OFF' || tipe === 'ADJUST');
   body.innerHTML = K.lines.map(function(l, i){
     var p = produkBySku(l.sku) || { sku:l.sku, nama:'?' }, bs = batchesOf(l.sku), ada = totalStok(l.sku); total += l.qty;
     var batchCell;
@@ -795,10 +797,10 @@ $('k-simpan').addEventListener('click', simpanKeluar);
 function simpanKeluar(){
   var K = state.keluar, tipe = kTipe();
   if (!K.lines.length) { kMsg('Belum ada barang yang discan.', true); return; }
-  if (tipe === 'WRITE_OFF' && !$('k-alasan').value.trim()) { kMsg('Isi alasan untuk barang rusak/expired/tester.', true); $('k-alasan').focus(); return; }
-  if (tipe === 'WRITE_OFF' && K.lines.some(function(l){ return l.batch === 'auto'; })) { kMsg('Untuk rusak/expired pilih batch-nya satu per satu (bukan otomatis).', true); return; }
+  if ((tipe === 'WRITE_OFF' || tipe === 'ADJUST') && !$('k-alasan').value.trim()) { kMsg('Isi alasannya dulu.', true); $('k-alasan').focus(); return; }
+  if ((tipe === 'WRITE_OFF' || tipe === 'ADJUST') && K.lines.some(function(l){ return l.batch === 'auto'; })) { kMsg('Untuk rusak/expired/koreksi pilih batch-nya satu per satu (bukan otomatis).', true); return; }
   if (tipe === 'OUT' && !K.ref) { kMsg('Isi nomor resi / referensi dulu (bisa discan dari label resi).', true); $('k-ref').focus(); return; }
-  var items = K.lines.map(function(l){ return { sku:l.sku, batch:l.batch, qty:l.qty }; });
+  var items = K.lines.map(function(l){ return { sku:l.sku, batch:l.batch, qty: tipe === 'ADJUST' ? -l.qty : l.qty }; });
   kirim('keluar', { tipe:tipe, ref:K.ref, catatan:$('k-alasan').value.trim(), items:items });
 }
 
@@ -835,7 +837,7 @@ function tambahMasuk(){
 }
 function renderMasuk(){
   var M = state.masuk, tipe = mTipe(), total = 0;
-  $('m-catatan-wrap').hidden = tipe !== 'RETURN'; $('m-ref-label').textContent = tipe === 'RETURN' ? 'Nomor resi retur / referensi' : 'Nomor surat jalan';
+  $('m-catatan-wrap').hidden = !(tipe === 'RETURN' || tipe === 'ADJUST'); $('m-catatan-label').textContent = tipe === 'ADJUST' ? 'Alasan koreksi (wajib)' : 'Kondisi / catatan (wajib)'; $('m-ref-label').textContent = tipe === 'RETURN' ? 'Nomor resi retur / referensi' : tipe === 'ADJUST' ? 'Referensi (mis. opname tgl …)' : 'Nomor surat jalan';
   $('m-body').innerHTML = M.lines.map(function(l, i){ var p = produkBySku(l.sku) || { nama:'?' }; total += l.qty; return '<tr><td class="mono"><b>' + esc(l.sku) + '</b></td><td>' + esc(displayName(p)) + '</td><td class="mono">' + esc(l.batch) + '</td><td>' + fmtTgl(l.expiry) + '</td><td class="num">' + fmtNum(l.qty) + '</td><td class="actions"><button class="btn sm" data-i="' + i + '">✕</button></td></tr>'; }).join('') || '<tr><td colspan="6" class="muted">Belum ada barang. Scan produk, isi batch dan expiry.</td></tr>';
   $('m-summary').textContent = M.lines.length ? M.lines.length + ' baris · ' + fmtNum(total) + ' pcs' + (M.ref ? ' · ' + M.ref : '') : '';
 }
@@ -851,7 +853,7 @@ function simpanMasuk(){
   var M = state.masuk, tipe = mTipe();
   if (!M.lines.length) { mMsg('Belum ada barang.', true); return; }
   if (tipe === 'IN' && !M.ref) { mMsg('Isi nomor surat jalan dulu.', true); $('m-ref').focus(); return; }
-  if (tipe === 'RETURN' && !$('m-catatan').value.trim()) { mMsg('Isi kondisi barang retur.', true); $('m-catatan').focus(); return; }
+  if ((tipe === 'RETURN' || tipe === 'ADJUST') && !$('m-catatan').value.trim()) { mMsg(tipe === 'ADJUST' ? 'Isi alasan koreksi.' : 'Isi kondisi barang retur.', true); $('m-catatan').focus(); return; }
   var items = M.lines.map(function(l){ return { sku:l.sku, batch:l.batch, expiry:l.expiry, produksi:l.produksi, qty:l.qty }; });
   kirim('masuk', { tipe:tipe, ref:M.ref, catatan:$('m-catatan').value.trim(), items:items });
 }
@@ -862,9 +864,11 @@ function kirim(jenis, data, idemLama){
   var btn = $(jenis === 'keluar' ? 'k-simpan' : 'm-simpan'), pend = $(jenis === 'keluar' ? 'k-pending' : 'm-pending'), msgFn = jenis === 'keluar' ? kMsg : mMsg;
   btn.disabled = true; btn.textContent = 'Menyimpan…'; pend.innerHTML = '';
   api('mutasi', Object.assign({ n:150 }, data), idem).then(function(r){
-    var n = r.tersimpan || 0, ringkas = (data.items || []).reduce(function(s, it){ return s + Number(it.qty); }, 0);
-    if (jenis === 'keluar') { state.keluar = { ref:'', tipe:kTipe(), alasan:'', lines:[] }; $('k-ref').value = ''; $('k-alasan').value = ''; renderKeluar(); kMsg('Tersimpan: ' + fmtNum(ringkas) + ' pcs keluar' + (data.ref ? ' untuk ' + data.ref : '') + (r.duplikat ? ' (sudah tersimpan sebelumnya)' : '') + '.'); $('k-ref').focus(); }
-    else { state.masuk = { ref:'', tipe:mTipe(), catatan:'', lines:[] }; $('m-ref').value = ''; $('m-catatan').value = ''; renderMasuk(); mMsg('Tersimpan: ' + fmtNum(ringkas) + ' pcs masuk' + (data.ref ? ' dari ' + data.ref : '') + (r.duplikat ? ' (sudah tersimpan sebelumnya)' : '') + '.'); $('m-ref').focus(); }
+    var ringkas = (data.items || []).reduce(function(s, it){ return s + Math.abs(Number(it.qty)); }, 0);
+    var kata = { OUT:'keluar', WRITE_OFF:'dihapus-bukukan (rusak/expired)', IN:'masuk', RETURN:'masuk karantina retur', ADJUST: jenis === 'keluar' ? 'dikurangi lewat koreksi' : 'ditambah lewat koreksi' }[data.tipe] || data.tipe;
+    var pesan = 'Tersimpan: ' + fmtNum(ringkas) + ' pcs ' + kata + (data.ref ? ' · ref ' + data.ref : '') + (r.duplikat ? ' (sudah tersimpan sebelumnya)' : '') + '.';
+    if (jenis === 'keluar') { state.keluar = { ref:'', tipe:kTipe(), alasan:'', lines:[] }; $('k-ref').value = ''; $('k-alasan').value = ''; renderKeluar(); kMsg(pesan); $('k-ref').focus(); }
+    else { state.masuk = { ref:'', tipe:mTipe(), catatan:'', lines:[] }; $('m-ref').value = ''; $('m-catatan').value = ''; renderMasuk(); mMsg(pesan); $('m-ref').focus(); }
     save(); toast('Tersimpan ke spreadsheet.'); beep(true);
   }).catch(function(e){
     msgFn('Gagal: ' + e.message, true); beep(false);
