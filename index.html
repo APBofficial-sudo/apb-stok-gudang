@@ -180,6 +180,16 @@ details li{margin:4px 0}
 .label .l3{font-family:"Courier New",Courier,monospace;font-weight:700;font-size:2.5mm;letter-spacing:0.35mm;margin-top:0.5mm;white-space:nowrap}
 .label .l4{font-size:2.3mm;white-space:nowrap;margin-top:0.3mm}
 .label.kecil .l1{font-size:2.5mm} .label.kecil .l2{font-size:2.1mm;margin-bottom:0.4mm} .label.kecil .l3{font-size:2.1mm;letter-spacing:0.25mm;margin-top:0.3mm} .label.kecil .l4{font-size:2mm}
+.label.qrh{flex-direction:row;align-items:center;justify-content:flex-start;text-align:left;padding:1mm 1.2mm;gap:1mm}
+.label.qrh svg.qr{flex:none;display:block}
+.label.qrh .teks{display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;line-height:1.12}
+.label.qrh .l1{font-size:2.1mm;white-space:normal;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;text-overflow:clip}
+.label.qrh .l2{font-size:1.85mm;margin:0.2mm 0 0.4mm}
+.label.qrh .l3{font-size:2mm;letter-spacing:0.2mm;margin-top:0}
+.label.qrh .l4{font-size:1.8mm;margin-top:0.2mm}
+.label.qrh.kecil .l1{font-size:1.9mm} .label.qrh.kecil .l2{font-size:1.7mm} .label.qrh.kecil .l3{font-size:1.8mm}
+.sheet .tick{position:absolute;background:#555}
+.sheet .ticklabel{position:absolute;font:2mm Arial,Helvetica,sans-serif;color:#555}
 #print-root{display:none}
 @media print{
   @page{size:A4 portrait;margin:0}
@@ -376,8 +386,9 @@ details li{margin:4px 0}
               <label class="check"><input type="checkbox" id="opt-rak"> Kode rak</label>
             </div>
             <div class="grid g2">
-              <label class="f">Tinggi barcode (mm) <input type="number" id="opt-barh" min="4" max="60" step="0.5"></label>
+              <label class="f">Jenis kode <select id="opt-kode"><option value="auto">Otomatis (QR untuk label kecil)</option><option value="qr">QR</option><option value="code128">Barcode garis (Code 128)</option></select></label>
               <label class="f">Ukuran teks <select id="opt-teks"><option value="normal">Normal</option><option value="kecil">Kecil</option></select></label>
+              <label class="f"><span id="opt-barh-label">Tinggi barcode (mm)</span> <input type="number" id="opt-barh" min="4" max="60" step="0.5"></label>
             </div>
             <div id="modinfo" class="modinfo"><span class="dot"></span><span>Isi jumlah stiker untuk melihat ukuran barcode.</span></div>
             <details>
@@ -601,6 +612,141 @@ var Code128 = (function () {
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = Code128;
 
+/* Pembuat QR Code (versi 1–6, koreksi M) — mode alfanumerik/byte, 8 mask dengan penilaian penalti standar.
+   Keluaran: matriks modul (1 = hitam). Tanpa pustaka luar. */
+var QR = (function () {
+  var ALNUM = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+  /* versi → [total codewords, EC per blok, jumlah blok1, data per blok1, jumlah blok2, data per blok2] untuk level M */
+  var SPEC = { 1:[26,10,1,16,0,0], 2:[44,16,1,28,0,0], 3:[70,26,1,44,0,0], 4:[100,18,2,32,0,0], 5:[134,24,2,43,0,0], 6:[172,16,4,27,0,0] };
+  var ALIGN = { 1:[], 2:[6,18], 3:[6,22], 4:[6,26], 5:[6,30], 6:[6,34] };
+  var REMAINDER = { 1:0, 2:7, 3:7, 4:7, 5:7, 6:7 };
+
+  /* GF(256) */
+  var EXP = new Array(512), LOG = new Array(256);
+  (function () { var x = 1; for (var i = 0; i < 255; i++) { EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; } for (var j = 255; j < 512; j++) EXP[j] = EXP[j - 255]; })();
+  function gmul(a, b) { if (!a || !b) return 0; return EXP[LOG[a] + LOG[b]]; }
+  function rsGenerator(n) { var g = [1]; for (var i = 0; i < n; i++) { var ng = new Array(g.length + 1).fill(0); for (var j = 0; j < g.length; j++) { ng[j] ^= g[j]; ng[j + 1] ^= gmul(g[j], EXP[i]); } g = ng; } return g; }
+  function rsEncode(data, n) { var g = rsGenerator(n), res = new Array(n).fill(0); for (var i = 0; i < data.length; i++) { var f = data[i] ^ res[0]; res.shift(); res.push(0); if (f) for (var j = 0; j < n; j++) res[j] ^= gmul(g[j + 1], f); } return res; }
+
+  function isAlnum(t) { for (var i = 0; i < t.length; i++) if (ALNUM.indexOf(t[i]) < 0) return false; return true; }
+  function bitsFor(text, version) {
+    var bits = [], alnum = isAlnum(text);
+    function push(v, n) { for (var i = n - 1; i >= 0; i--) bits.push((v >> i) & 1); }
+    if (alnum) { push(2, 4); push(text.length, 9); for (var i = 0; i < text.length; i += 2) { if (i + 1 < text.length) push(ALNUM.indexOf(text[i]) * 45 + ALNUM.indexOf(text[i + 1]), 11); else push(ALNUM.indexOf(text[i]), 6); } }
+    else { var bytes = []; for (var k = 0; k < text.length; k++) { var c = text.charCodeAt(k); if (c > 255) throw new Error('Karakter tidak didukung: ' + text[k]); bytes.push(c); } push(4, 4); push(bytes.length, 8); bytes.forEach(function (b) { push(b, 8); }); }
+    var s = SPEC[version], dataCw = s[2] * s[3] + s[4] * s[5], cap = dataCw * 8;
+    if (bits.length > cap) return null;
+    push(0, Math.min(4, cap - bits.length));
+    while (bits.length % 8) bits.push(0);
+    var pads = [0xEC, 0x11], p = 0;
+    while (bits.length < cap) { push(pads[p], 8); p ^= 1; }
+    var cw = []; for (var b = 0; b < bits.length; b += 8) { var v = 0; for (var q = 0; q < 8; q++) v = (v << 1) | bits[b + q]; cw.push(v); }
+    return cw;
+  }
+  function pickVersion(text) { for (var v = 1; v <= 6; v++) { var cw = bitsFor(text, v); if (cw) return { version: v, data: cw }; } throw new Error('Teks terlalu panjang untuk QR versi ≤ 6'); }
+
+  function interleave(data, version) {
+    var s = SPEC[version], blocks = [], pos = 0;
+    for (var i = 0; i < s[2]; i++) { blocks.push(data.slice(pos, pos + s[3])); pos += s[3]; }
+    for (var j = 0; j < s[4]; j++) { blocks.push(data.slice(pos, pos + s[5])); pos += s[5]; }
+    var ecs = blocks.map(function (b) { return rsEncode(b, s[1]); });
+    var out = [], maxLen = Math.max.apply(null, blocks.map(function (b) { return b.length; }));
+    for (var k = 0; k < maxLen; k++) blocks.forEach(function (b) { if (k < b.length) out.push(b[k]); });
+    for (var e = 0; e < s[1]; e++) ecs.forEach(function (b) { out.push(b[e]); });
+    return out;
+  }
+
+  function build(text) {
+    var pv = pickVersion(text), version = pv.version, N = 17 + 4 * version;
+    var m = [], fixed = [];
+    for (var r = 0; r < N; r++) { m.push(new Array(N).fill(0)); fixed.push(new Array(N).fill(false)); }
+    function set(r, c, v) { m[r][c] = v; fixed[r][c] = true; }
+    function finder(r0, c0) { for (var r = -1; r <= 7; r++) for (var c = -1; c <= 7; c++) { var rr = r0 + r, cc = c0 + c; if (rr < 0 || cc < 0 || rr >= N || cc >= N) continue; var on = (r >= 0 && r <= 6 && c >= 0 && c <= 6) && (r === 0 || r === 6 || c === 0 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4)); set(rr, cc, on ? 1 : 0); } }
+    finder(0, 0); finder(0, N - 7); finder(N - 7, 0);
+    for (var t = 8; t < N - 8; t++) { set(6, t, t % 2 === 0 ? 1 : 0); set(t, 6, t % 2 === 0 ? 1 : 0); }
+    var al = ALIGN[version];
+    for (var a = 0; a < al.length; a++) for (var b = 0; b < al.length; b++) {
+      var ar = al[a], ac = al[b];
+      if (fixed[ar][ac]) continue; /* bertabrakan dengan finder */
+      for (var dr = -2; dr <= 2; dr++) for (var dc = -2; dc <= 2; dc++) { var on = Math.max(Math.abs(dr), Math.abs(dc)) !== 1; set(ar + dr, ac + dc, on ? 1 : 0); }
+    }
+    set(N - 8, 8, 1); /* modul gelap */
+    /* cadangkan area format info */
+    for (var i = 0; i < 9; i++) { if (i !== 6) { fixed[8][i] = true; fixed[i][8] = true; } }
+    for (var j = 0; j < 8; j++) { fixed[8][N - 1 - j] = true; fixed[N - 1 - j][8] = true; }
+    /* tempatkan data */
+    var cw = interleave(pv.data, version), bits = [];
+    cw.forEach(function (c) { for (var q = 7; q >= 0; q--) bits.push((c >> q) & 1); });
+    for (var rm = 0; rm < REMAINDER[version]; rm++) bits.push(0);
+    var bi = 0, up = true;
+    for (var col = N - 1; col > 0; col -= 2) {
+      if (col === 6) col--;
+      for (var k = 0; k < N; k++) {
+        var row = up ? N - 1 - k : k;
+        for (var d = 0; d < 2; d++) { var cc2 = col - d; if (fixed[row][cc2]) continue; m[row][cc2] = bi < bits.length ? bits[bi] : 0; bi++; }
+      }
+      up = !up;
+    }
+    /* pilih mask terbaik */
+    var best = null, bestScore = Infinity;
+    for (var mask = 0; mask < 8; mask++) {
+      var mm = m.map(function (row) { return row.slice(); });
+      for (var r2 = 0; r2 < N; r2++) for (var c2 = 0; c2 < N; c2++) if (!fixed[r2][c2] && maskBit(mask, r2, c2)) mm[r2][c2] ^= 1;
+      writeFormat(mm, N, mask);
+      var sc = penalty(mm, N);
+      if (sc < bestScore) { bestScore = sc; best = mm; }
+    }
+    return { version: version, size: N, modules: best };
+  }
+  function maskBit(mask, r, c) {
+    switch (mask) {
+      case 0: return (r + c) % 2 === 0; case 1: return r % 2 === 0; case 2: return c % 3 === 0; case 3: return (r + c) % 3 === 0;
+      case 4: return (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0; case 5: return (r * c) % 2 + (r * c) % 3 === 0;
+      case 6: return ((r * c) % 2 + (r * c) % 3) % 2 === 0; default: return ((r + c) % 2 + (r * c) % 3) % 2 === 0;
+    }
+  }
+  function writeFormat(mm, N, mask) {
+    var data = (0 << 3) | mask; /* level M = 00 */
+    var v = data << 10; for (var i = 14; i >= 10; i--) if ((v >> i) & 1) v ^= 0x537 << (i - 10);
+    var fmt = ((data << 10) | v) ^ 0x5412, bits = [];
+    for (var b = 14; b >= 0; b--) bits.push((fmt >> b) & 1);
+    /* salinan 1: sekitar finder kiri-atas */
+    var pos1 = [[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]];
+    for (var k = 0; k < 15; k++) mm[pos1[k][0]][pos1[k][1]] = bits[k];
+    /* salinan 2 */
+    for (var k2 = 0; k2 < 7; k2++) mm[N - 1 - k2][8] = bits[k2];
+    for (var k3 = 7; k3 < 15; k3++) mm[8][N - 15 + k3] = bits[k3];
+  }
+  function penalty(mm, N) {
+    var score = 0, r, c;
+    /* aturan 1: deretan ≥5 sewarna */
+    for (r = 0; r < N; r++) { var run = 1; for (c = 1; c < N; c++) { if (mm[r][c] === mm[r][c - 1]) { run++; } else { if (run >= 5) score += run - 2; run = 1; } } if (run >= 5) score += run - 2; }
+    for (c = 0; c < N; c++) { var run2 = 1; for (r = 1; r < N; r++) { if (mm[r][c] === mm[r - 1][c]) { run2++; } else { if (run2 >= 5) score += run2 - 2; run2 = 1; } } if (run2 >= 5) score += run2 - 2; }
+    /* aturan 2: blok 2×2 */
+    for (r = 0; r < N - 1; r++) for (c = 0; c < N - 1; c++) { var v = mm[r][c]; if (mm[r][c + 1] === v && mm[r + 1][c] === v && mm[r + 1][c + 1] === v) score += 3; }
+    /* aturan 3: pola 1011101 dengan 4 terang di satu sisi */
+    var P1 = [1,0,1,1,1,0,1,0,0,0,0], P2 = [0,0,0,0,1,0,1,1,1,0,1];
+    function matchAt(get) { var a = true, b = true; for (var i = 0; i < 11; i++) { var x = get(i); if (x !== P1[i]) a = false; if (x !== P2[i]) b = false; } return (a ? 1 : 0) + (b ? 1 : 0); }
+    for (r = 0; r < N; r++) for (c = 0; c <= N - 11; c++) { score += 40 * matchAt(function (i) { return mm[r][c + i]; }); }
+    for (c = 0; c < N; c++) for (r = 0; r <= N - 11; r++) { score += 40 * matchAt(function (i) { return mm[r + i][c]; }); }
+    /* aturan 4: proporsi gelap */
+    var dark = 0; for (r = 0; r < N; r++) for (c = 0; c < N; c++) dark += mm[r][c];
+    var pct = dark * 100 / (N * N), prev = Math.floor(pct / 5) * 5, next = prev + 5;
+    score += Math.min(Math.abs(prev - 50) / 5, Math.abs(next - 50) / 5) * 10;
+    return score;
+  }
+  /* SVG: moduleMm = ukuran modul (mm), quiet = modul kosong di tepi */
+  function svg(text, moduleMm, quiet) {
+    var q = build(text); quiet = quiet == null ? 2 : quiet;
+    var total = q.size + quiet * 2, path = '';
+    for (var r = 0; r < q.size; r++) { var c = 0; while (c < q.size) { if (q.modules[r][c]) { var start = c; while (c < q.size && q.modules[r][c]) c++; path += 'M' + (start + quiet) + ' ' + (r + quiet) + 'h' + (c - start) + 'v1h-' + (c - start) + 'z'; } else c++; } }
+    var mm = (total * moduleMm).toFixed(3);
+    return '<svg xmlns="http://www.w3.org/2000/svg" class="qr" viewBox="0 0 ' + total + ' ' + total + '" width="' + mm + 'mm" height="' + mm + 'mm" shape-rendering="crispEdges"><path fill="#000" d="' + path + '"/></svg>';
+  }
+  return { build: build, svg: svg };
+})();
+if (typeof module !== 'undefined' && module.exports) module.exports = QR;
+
 </script>
 <script>
 (function(){
@@ -617,14 +763,15 @@ var PRESETS = [
   { id:'16', label:'16 label · 105 × 37 mm (2 × 8)', cols:2, rows:8, w:105, h:37, mt:0.5, ml:0, gx:0, gy:0 },
   { id:'14', label:'14 label · 99,1 × 38,1 mm (2 × 7)', cols:2, rows:7, w:99.1, h:38.1, mt:15.15, ml:4.65, gx:2.5, gy:0 },
   { id:'44', label:'44 label · 48,5 × 25,4 mm (4 × 11)', cols:4, rows:11, w:48.5, h:25.4, mt:8.8, ml:8, gx:0, gy:0 },
-  { id:'65', label:'65 label · 38,1 × 21,2 mm (5 × 13) — terlalu sempit untuk SKU 9 karakter', cols:5, rows:13, w:38.1, h:21.2, mt:10.7, ml:4.75, gx:2.5, gy:0 },
+  { id:'84', label:'84 label · 32 × 19 mm (Blueprint HVS, 6 × 14) — pakai QR', cols:6, rows:14, w:32, h:19, mt:2.5, ml:4, gx:2, gy:2, qr:14 },
+  { id:'65', label:'65 label · 38,1 × 21,2 mm (5 × 13) — pakai QR', cols:5, rows:13, w:38.1, h:21.2, mt:10.7, ml:4.75, gx:2.5, gy:0, qr:15 },
   { id:'custom', label:'Ukuran sendiri (isi manual)' }
 ];
 var state;
 function freshState(){
   return { version:2, server:{ url:'', pin:'', petugas:'', role:'', nama_gudang:'', sheet_url:'' }, online:false, cache:null, lastSync:null,
     kategori: DEFAULT_KAT.map(function(k){ return { kode:k.kode, nama:k.nama }; }),
-    layout:{ preset:'24', cols:3, rows:8, w:70, h:37, mt:0.5, ml:0, gx:0, gy:0, start:1, barH:10, teks:'normal', nama:true, varian:true, harga:false, rak:false },
+    layout:{ preset:'24', cols:3, rows:8, w:70, h:37, mt:0.5, ml:0, gx:0, gy:0, start:1, barH:10, teks:'normal', kode:'auto', nama:true, varian:true, harga:false, rak:false },
     job:{}, keluar:{ ref:'', tipe:'OUT', alasan:'', lines:[] }, masuk:{ ref:'', tipe:'IN', catatan:'', lines:[] }, pending:{} };
 }
 function load(){ try { var raw = localStorage.getItem(LS_KEY); if (raw) { state = JSON.parse(raw); var f = freshState(); Object.keys(f).forEach(function(k){ if (state[k] === undefined) state[k] = f[k]; }); return; } } catch (e) {} state = freshState(); }
@@ -1046,23 +1193,33 @@ $('impor-jalankan').addEventListener('click', function(){
 function labelProduk(){ return produkList().filter(function(p){ return p.aktif; }).concat([CMD['CMD-SIMPAN'], CMD['CMD-BATAL']]); }
 function labelBySku(sku){ return CMD[sku] || produkBySku(sku); }
 var LY_FIELDS = ['cols','rows','w','h','mt','ml','gx','gy'];
-function layoutFromInputs(){ var L = state.layout; LY_FIELDS.forEach(function(k){ var v = parseFloat($('ly-' + k).value); if (!isNaN(v)) L[k] = v; }); var st = parseFloat($('ly-start').value), bh = parseFloat($('opt-barh').value); if (!isNaN(st)) L.start = st; if (!isNaN(bh)) L.barH = bh; L.cols = Math.max(1, Math.round(L.cols)); L.rows = Math.max(1, Math.round(L.rows)); L.start = Math.min(Math.max(1, Math.round(L.start || 1)), L.cols * L.rows); $('ly-start').max = L.cols * L.rows; L.teks = $('opt-teks').value; L.nama = $('opt-nama').checked; L.varian = $('opt-varian').checked; L.harga = $('opt-harga').checked; L.rak = $('opt-rak').checked; L.preset = $('preset').value; }
-function inputsFromLayout(){ var L = state.layout; $('preset').value = L.preset || 'custom'; LY_FIELDS.forEach(function(k){ $('ly-' + k).value = L[k]; }); $('ly-start').value = L.start || 1; $('ly-start').max = L.cols * L.rows; $('opt-barh').value = L.barH; $('opt-teks').value = L.teks || 'normal'; $('opt-nama').checked = L.nama !== false; $('opt-varian').checked = L.varian !== false; $('opt-harga').checked = !!L.harga; $('opt-rak').checked = !!L.rak; }
+function layoutFromInputs(){ var L = state.layout; LY_FIELDS.forEach(function(k){ var v = parseFloat($('ly-' + k).value); if (!isNaN(v)) L[k] = v; }); var st = parseFloat($('ly-start').value), bh = parseFloat($('opt-barh').value); if (!isNaN(st)) L.start = st; if (!isNaN(bh)) L.barH = bh; L.cols = Math.max(1, Math.round(L.cols)); L.rows = Math.max(1, Math.round(L.rows)); L.start = Math.min(Math.max(1, Math.round(L.start || 1)), L.cols * L.rows); $('ly-start').max = L.cols * L.rows; L.teks = $('opt-teks').value; L.kode = $('opt-kode').value; L.nama = $('opt-nama').checked; L.varian = $('opt-varian').checked; L.harga = $('opt-harga').checked; L.rak = $('opt-rak').checked; L.preset = $('preset').value; }
+function inputsFromLayout(){ var L = state.layout; $('preset').value = L.preset || 'custom'; LY_FIELDS.forEach(function(k){ $('ly-' + k).value = L[k]; }); $('ly-start').value = L.start || 1; $('ly-start').max = L.cols * L.rows; $('opt-barh').value = L.barH; $('opt-teks').value = L.teks || 'normal'; $('opt-kode').value = L.kode || 'auto'; $('opt-barh-label').textContent = jenisKode(L) === 'qr' ? 'Ukuran QR (mm)' : 'Tinggi barcode (mm)'; $('opt-nama').checked = L.nama !== false; $('opt-varian').checked = L.varian !== false; $('opt-harga').checked = !!L.harga; $('opt-rak').checked = !!L.rak; }
 $('preset').innerHTML = PRESETS.map(function(p){ return '<option value="' + p.id + '">' + esc(p.label) + '</option>'; }).join('');
-$('preset').addEventListener('change', function(){ var p = PRESETS.filter(function(x){ return x.id === $('preset').value; })[0]; if (p && p.id !== 'custom') { LY_FIELDS.forEach(function(k){ state.layout[k] = p[k]; }); state.layout.start = 1; if (p.h < 27) { state.layout.barH = 7; state.layout.teks = 'kecil'; } else { state.layout.barH = 10; state.layout.teks = 'normal'; } } state.layout.preset = $('preset').value; inputsFromLayout(); save(); renderPreview(); });
+$('preset').addEventListener('change', function(){ var p = PRESETS.filter(function(x){ return x.id === $('preset').value; })[0]; if (p && p.id !== 'custom') { LY_FIELDS.forEach(function(k){ state.layout[k] = p[k]; }); state.layout.start = 1; if (p.qr) { state.layout.barH = p.qr; state.layout.teks = 'kecil'; } else if (p.h < 27) { state.layout.barH = 7; state.layout.teks = 'kecil'; } else { state.layout.barH = 10; state.layout.teks = 'normal'; } } state.layout.preset = $('preset').value; inputsFromLayout(); save(); renderPreview(); });
 LY_FIELDS.forEach(function(k){ $('ly-' + k).addEventListener('input', function(){ $('preset').value = 'custom'; layoutFromInputs(); save(); renderPreview(); }); });
-['ly-start','opt-barh','opt-teks','opt-nama','opt-varian','opt-harga','opt-rak'].forEach(function(id){ $(id).addEventListener('input', function(){ layoutFromInputs(); save(); renderPreview(); }); $(id).addEventListener('change', function(){ layoutFromInputs(); save(); renderPreview(); }); });
+['ly-start','opt-barh','opt-teks','opt-kode','opt-nama','opt-varian','opt-harga','opt-rak'].forEach(function(id){ $(id).addEventListener('input', function(){ layoutFromInputs(); save(); renderPreview(); }); $(id).addEventListener('change', function(){ layoutFromInputs(); save(); renderPreview(); }); });
 function jobList(){ var list = []; labelProduk().forEach(function(p){ var q = Number(state.job[p.sku] || 0); if (q > 0) list.push({ p:p, qty:Math.round(q) }); }); return list; }
 function renderQty(){ var q = $('cari-cetak').value.trim().toLowerCase(); var rows = labelProduk().filter(function(p){ return !q || (p.sku + ' ' + displayName(p)).toLowerCase().indexOf(q) >= 0; }); $('qty-body').innerHTML = rows.map(function(p){ return '<tr><td class="mono"><b>' + esc(p.sku) + '</b></td><td>' + esc(displayName(p)) + (p.cmd ? ' <span class="badge">perintah</span>' : '') + '</td><td class="num"><input type="number" class="qty" min="0" step="1" data-sku="' + esc(p.sku) + '" id="qty-' + esc(p.sku) + '" value="' + (state.job[p.sku] || '') + '" placeholder="0"></td></tr>'; }).join('') || '<tr><td colspan="3" class="muted">Tidak ada produk.</td></tr>'; }
 $('cari-cetak').addEventListener('input', renderQty);
 $('qty-body').addEventListener('input', function(e){ var el = e.target; if (!el.dataset || !el.dataset.sku) return; var v = parseInt(el.value, 10); if (!v || v < 0) delete state.job[el.dataset.sku]; else state.job[el.dataset.sku] = v; save(); renderPreview(); });
 $('btn-kosongkan').addEventListener('click', function(){ state.job = {}; save(); renderQty(); renderPreview(); });
+function jenisKode(L){ var k = L.kode || 'auto'; if (k === 'auto') return (L.h < 26 || L.w < 48) ? 'qr' : 'code128'; return k; }
 function moduleMm(sku, L){ var innerW = L.w - 3, enc = Code128.encode(sku), total = enc.width + 20, mod = Math.min(0.38, innerW / total); return { mod:mod, total:total, widthMm:mod * total }; }
-function labelHtml(p, L){ var m = moduleMm(p.sku, L), mod = Math.max(0.15, m.mod), extra = []; if (L.harga && p.harga != null) extra.push(fmtRp(p.harga)); if (L.rak && p.rak) extra.push(p.rak); var line2 = [p.varian, ukuranText(p)].filter(Boolean).join(' · '); return '<div class="label' + (L.teks === 'kecil' ? ' kecil' : '') + '">' + (L.nama ? '<div class="l1">' + esc(p.nama) + '</div>' : '') + (L.varian && line2 ? '<div class="l2">' + esc(line2) + '</div>' : '') + Code128.svg(p.sku, mod, L.barH) + '<div class="l3">' + esc(p.sku) + '</div>' + (extra.length ? '<div class="l4">' + esc(extra.join(' · ')) + '</div>' : '') + '</div>'; }
+function qrMm(sku, L){ var q = QR.build(sku), total = q.size + 4, side = Math.min(Number(L.barH) || 14, L.h - 2.2, L.w * 0.55); return { mod: side / total, total: total, sideMm: side, version: q.version }; }
+function labelHtml(p, L){
+  var extra = []; if (L.harga && p.harga != null) extra.push(fmtRp(p.harga)); if (L.rak && p.rak) extra.push(p.rak);
+  var line2 = [p.varian, ukuranText(p)].filter(Boolean).join(' · '), kecil = L.teks === 'kecil' ? ' kecil' : '';
+  var teks = (L.nama ? '<div class="l1">' + esc(p.nama) + '</div>' : '') + (L.varian && line2 ? '<div class="l2">' + esc(line2) + '</div>' : '') + '<div class="l3">' + esc(p.sku) + '</div>' + (extra.length ? '<div class="l4">' + esc(extra.join(' · ')) + '</div>' : '');
+  if (jenisKode(L) === 'qr') { var q = qrMm(p.sku, L); return '<div class="label qrh' + kecil + '">' + QR.svg(p.sku, q.mod, 2) + '<div class="teks">' + teks + '</div></div>'; }
+  var m = moduleMm(p.sku, L), mod = Math.max(0.15, m.mod);
+  return '<div class="label' + kecil + '">' + (L.nama ? '<div class="l1">' + esc(p.nama) + '</div>' : '') + (L.varian && line2 ? '<div class="l2">' + esc(line2) + '</div>' : '') + Code128.svg(p.sku, mod, L.barH) + '<div class="l3">' + esc(p.sku) + '</div>' + (extra.length ? '<div class="l4">' + esc(extra.join(' · ')) + '</div>' : '') + '</div>';
+}
 function buildSheets(L, items, opts){
   opts = opts || {}; var per = L.cols * L.rows, startIdx = Math.max(0, (L.start || 1) - 1), pages = opts.calib ? 1 : Math.max(1, Math.ceil((startIdx + items.length) / per)), html = '', idx = 0;
   for (var pg = 0; pg < pages; pg++) {
     html += '<div class="sheet' + (opts.calib ? ' calib' : '') + (opts.grid ? ' show-grid' : '') + '">';
+    if (opts.calib) { for (var mmv = 5; mmv <= 205; mmv += 5) { var big = mmv % 10 === 0; html += '<div class="tick" style="left:' + mmv + 'mm;top:0;width:0.2mm;height:' + (big ? 3 : 1.5) + 'mm"></div>' + (big ? '<div class="ticklabel" style="left:' + (mmv + 0.4) + 'mm;top:0.2mm">' + mmv + '</div>' : ''); } for (var mmh = 5; mmh <= 292; mmh += 5) { var big2 = mmh % 10 === 0; html += '<div class="tick" style="top:' + mmh + 'mm;left:0;height:0.2mm;width:' + (big2 ? 3 : 1.5) + 'mm"></div>' + (big2 ? '<div class="ticklabel" style="top:' + (mmh - 2.2) + 'mm;left:0.4mm">' + mmh + '</div>' : ''); } }
     for (var r = 0; r < L.rows; r++) for (var c = 0; c < L.cols; c++) {
       var n = r * L.cols + c, left = L.ml + c * (L.w + L.gx), top = L.mt + r * (L.h + L.gy), pos = 'left:' + left.toFixed(3) + 'mm;top:' + top.toFixed(3) + 'mm;width:' + L.w + 'mm;height:' + L.h + 'mm;';
       var skip = (pg === 0 && n < startIdx), item = (!opts.calib && !skip && idx < items.length) ? items[idx] : null;
@@ -1084,7 +1241,9 @@ function renderPreview(){
   $('ly-warn').innerHTML = (wTot > 210.05 || hTot > 297.05) ? '<div class="note warn">Tata letak melebihi A4: lebar ' + fmtMm(wTot) + ' mm (maks 210), tinggi ' + fmtMm(hTot) + ' mm (maks 297).</div>' : '';
   var jl = jobList(), mi = $('modinfo');
   if (!jl.length) { mi.className = 'modinfo'; mi.innerHTML = '<span class="dot"></span><span>Isi jumlah stiker untuk melihat ukuran barcode.</span>'; }
-  else { var worst = null; jl.forEach(function(j){ var m = moduleMm(j.p.sku, L); if (!worst || m.mod < worst.mod) worst = m; }); var cls = worst.mod >= 0.28 ? 'ok' : worst.mod >= 0.24 ? 'warn' : 'bad'; mi.className = 'modinfo ' + cls; mi.innerHTML = '<span class="dot"></span><span>Garis tertipis ' + fmtMm(worst.mod) + ' mm, lebar barcode ' + fmtMm(worst.widthMm) + ' mm — ' + (cls === 'ok' ? 'aman untuk kamera HP' : cls === 'warn' ? 'cukup tipis, uji dulu' : 'terlalu kecil, pakai label lebih lebar') + '.</span>'; }
+  else if (jenisKode(L) === 'qr') { var w2 = null; jl.forEach(function(j){ var q = qrMm(j.p.sku, L); if (!w2 || q.mod < w2.mod) w2 = q; }); var c2 = w2.mod >= 0.45 ? 'ok' : w2.mod >= 0.35 ? 'warn' : 'bad'; mi.className = 'modinfo ' + c2; mi.innerHTML = '<span class="dot"></span><span>QR ' + fmtMm(w2.sideMm) + ' mm, kotak terkecil ' + fmtMm(w2.mod) + ' mm — ' + (c2 === 'ok' ? 'aman untuk kamera HP' : c2 === 'warn' ? 'cukup kecil, uji dulu' : 'terlalu kecil, besarkan ukuran QR') + '.</span>'; }
+  else { var worst = null; jl.forEach(function(j){ var m = moduleMm(j.p.sku, L); if (!worst || m.mod < worst.mod) worst = m; }); var cls = worst.mod >= 0.28 ? 'ok' : worst.mod >= 0.24 ? 'warn' : 'bad'; mi.className = 'modinfo ' + cls; mi.innerHTML = '<span class="dot"></span><span>Garis tertipis ' + fmtMm(worst.mod) + ' mm, lebar barcode ' + fmtMm(worst.widthMm) + ' mm — ' + (cls === 'ok' ? 'aman untuk kamera HP' : cls === 'warn' ? 'cukup tipis, uji dulu' : 'terlalu kecil, pakai QR atau label lebih lebar') + '.</span>'; }
+  $('opt-barh-label').textContent = jenisKode(L) === 'qr' ? 'Ukuran QR (mm)' : 'Tinggi barcode (mm)';
   if (pageIdx > pages - 1) pageIdx = pages - 1; if (pageIdx < 0) pageIdx = 0;
   $('pg-info').textContent = 'Lembar ' + (pageIdx + 1) + ' / ' + pages; $('pg-prev').disabled = pageIdx <= 0; $('pg-next').disabled = pageIdx >= pages - 1;
   var tmp = document.createElement('div'); tmp.innerHTML = buildSheets(L, items, { grid:true }); var sheet = tmp.children[pageIdx] || tmp.children[0];
