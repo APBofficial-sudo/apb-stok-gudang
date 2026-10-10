@@ -377,6 +377,17 @@ details li{margin:4px 0}
               <label class="f">Jarak antar baris (mm) <input type="number" id="ly-gy" min="0" max="50" step="0.1"></label>
             </div>
             <div id="ly-warn"></div>
+            <details id="kal-box">
+              <summary>Sesuaikan dengan penggaris (sekali saja)</summary>
+              <p class="small muted" style="margin:6px 0">Ukur di kertas stiker aslinya, dalam mm, dari <b>tepi kertas</b> ke <b>tepi label</b>. Lebar/tinggi label diambil dari kolom di atas.</p>
+              <div class="grid g2">
+                <label class="f">Kiri kertas → kiri label kolom 1 <input type="number" id="kal-a" step="0.5" placeholder="mis. 4"></label>
+                <label class="f">Kiri kertas → kiri label kolom terakhir <input type="number" id="kal-b" step="0.5" placeholder="mis. 174"></label>
+                <label class="f">Atas kertas → atas label baris 1 <input type="number" id="kal-c" step="0.5" placeholder="mis. 2,5"></label>
+                <label class="f">Atas kertas → atas label baris terakhir <input type="number" id="kal-d" step="0.5" placeholder="mis. 275,5"></label>
+              </div>
+              <div class="toolbar" style="margin-top:8px"><span class="muted small" id="kal-hasil"></span><span class="spacer"></span><button class="btn sm primary" id="kal-hitung">Hitung &amp; terapkan</button></div>
+            </details>
             <label class="f">Mulai dari label ke- <span class="hint">(lembar yang sebagian sudah terpakai; urutan kiri→kanan, atas→bawah)</span><input type="number" id="ly-start" min="1" step="1"></label>
             <h3>Isi label</h3>
             <div class="grid g2">
@@ -1204,6 +1215,16 @@ function renderQty(){ var q = $('cari-cetak').value.trim().toLowerCase(); var ro
 $('cari-cetak').addEventListener('input', renderQty);
 $('qty-body').addEventListener('input', function(e){ var el = e.target; if (!el.dataset || !el.dataset.sku) return; var v = parseInt(el.value, 10); if (!v || v < 0) delete state.job[el.dataset.sku]; else state.job[el.dataset.sku] = v; save(); renderPreview(); });
 $('btn-kosongkan').addEventListener('click', function(){ state.job = {}; save(); renderQty(); renderPreview(); });
+$('kal-hitung').addEventListener('click', function(){
+  var L = state.layout, a = parseFloat($('kal-a').value), b = parseFloat($('kal-b').value), c = parseFloat($('kal-c').value), d = parseFloat($('kal-d').value), out = $('kal-hasil');
+  if ([a, b, c, d].some(isNaN)) { out.textContent = 'Isi keempat angka dulu.'; return; }
+  if (L.cols < 2 || L.rows < 2) { out.textContent = 'Butuh minimal 2 kolom dan 2 baris.'; return; }
+  var px = (b - a) / (L.cols - 1), py = (d - c) / (L.rows - 1), gx = Math.round((px - L.w) * 10) / 10, gy = Math.round((py - L.h) * 10) / 10;
+  if (gx < -0.5 || gy < -0.5) { out.textContent = 'Angka tidak masuk akal (jarak antar label negatif). Cek lagi: kolom/baris, atau lebar/tinggi label.'; return; }
+  L.ml = Math.round(a * 10) / 10; L.mt = Math.round(c * 10) / 10; L.gx = Math.max(0, gx); L.gy = Math.max(0, gy); L.preset = 'custom'; L.start = 1;
+  inputsFromLayout(); save(); renderPreview();
+  out.textContent = 'Diterapkan: margin kiri ' + fmtMm(L.ml) + ', atas ' + fmtMm(L.mt) + ', jarak kolom ' + fmtMm(L.gx) + ', jarak baris ' + fmtMm(L.gy) + ' mm. Cetak lembar uji untuk memastikan.';
+});
 function jenisKode(L){ var k = L.kode || 'auto'; if (k === 'auto') return (L.h < 26 || L.w < 48) ? 'qr' : 'code128'; return k; }
 function moduleMm(sku, L){ var innerW = L.w - 3, enc = Code128.encode(sku), total = enc.width + 20, mod = Math.min(0.38, innerW / total); return { mod:mod, total:total, widthMm:mod * total }; }
 function qrMm(sku, L){ var q = QR.build(sku), total = q.size + 4, side = Math.min(Number(L.barH) || 14, L.h - 2.2, L.w * 0.55); return { mod: side / total, total: total, sideMm: side, version: q.version }; }
