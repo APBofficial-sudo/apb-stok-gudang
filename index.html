@@ -191,6 +191,8 @@ details li{margin:4px 0}
 .label.qrh.kecil .l1{font-size:1.9mm} .label.qrh.kecil .l2{font-size:1.7mm} .label.qrh.kecil .l3{font-size:1.8mm}
 .sheet .tick{position:absolute;background:#555}
 .sheet .ticklabel{position:absolute;font:2mm Arial,Helvetica,sans-serif;color:#555}
+.sheet .bar{position:absolute;background:#000}
+.sheet .bartext{position:absolute;font:2.6mm/1.25 Arial,Helvetica,sans-serif;color:#000;white-space:nowrap}
 #print-root{display:none}
 @media print{
   @page{size:A4 portrait;margin:0}
@@ -382,7 +384,7 @@ details li{margin:4px 0}
             <div id="ly-warn"></div>
             <details id="kor-box">
               <summary>Koreksi dari hasil cetak (lihat 4 label pojok)</summary>
-              <p class="small muted" style="margin:6px 0">Cetak <b>lembar uji</b> di kertas stiker (atau di kertas biasa, tumpuk di atas stiker lalu terawang). Lihat label di 4 pojok: isi berapa mm cetakan meleset dari stikernya. Yang sudah pas biarkan <b>0</b>. Perhitungan merapikan semua label sekaligus.</p>
+              <p class="small muted" style="margin:6px 0">Cetak <b>lembar uji</b> dengan skala 100 % di kertas stiker (atau di kertas biasa, tumpuk di atas stiker lalu terawang). Ukur dulu garis 150 mm-nya: kalau lebih pendek, masalahnya skala cetak, bukan tata letak. Lalu lihat label di 4 pojok: isi berapa mm cetakan meleset dari stikernya; yang sudah pas biarkan <b>0</b>.</p>
               <div class="grid" style="gap:8px">
                 <label class="f">Baris 1 (paling atas) <span class="kor"><select id="kor-t-d"><option value="atas">meleset ke atas</option><option value="bawah">meleset ke bawah</option></select><input type="number" id="kor-t" step="0.5" min="0" value="0"><span>mm</span></span></label>
                 <label class="f">Baris terakhir (paling bawah) <span class="kor"><select id="kor-b-d"><option value="bawah">meleset ke bawah</option><option value="atas">meleset ke atas</option></select><input type="number" id="kor-b" step="0.5" min="0" value="0"><span>mm</span></span></label>
@@ -420,7 +422,7 @@ details li{margin:4px 0}
               <summary>Pengaturan saat tombol Cetak diklik</summary>
               <ol>
                 <li>Kertas <b>A4</b>, tegak (portrait).</li>
-                <li>Skala <b>100%</b> — jangan "fit to page".</li>
+                <li>Skala <b>100 % / Actual size</b> — bukan "Fit", "Fit to printable area", atau "Shrink". Ini penyebab paling sering label meleset: tengah pas, pinggir lari.</li>
                 <li>Margin: <b>Tidak ada / None</b>.</li>
                 <li>Matikan header &amp; footer.</li>
                 <li>Pertama kali: cetak lembar uji, bandingkan dengan stiker. Kalau meleset, isi <b>Koreksi dari hasil cetak</b> di atas.</li>
@@ -891,6 +893,14 @@ var PdfLabel = (function () {
       if (opts.calib) {
         for (var mmv = 5; mmv <= 205; mmv += 5) { var big = mmv % 10 === 0; pg.rect(mmv, 0, 0.2, big ? 3 : 1.5); if (big) pg.text(mmv + 0.5, 2.2, String(mmv), 'F1', 2, 0, 0.35); }
         for (var mmh = 5; mmh <= 292; mmh += 5) { var big2 = mmh % 10 === 0; pg.rect(0, mmh, big2 ? 3 : 1.5, 0.2); if (big2) pg.text(0.6, mmh - 0.6, String(mmh), 'F1', 2, 0, 0.35); }
+        /* garis ukur: 150 mm mendatar di tengah tinggi kertas, 250 mm tegak di tengah lebar kertas */
+        var u = { hx:30, hy:148.5, hw:150, vx:105, vy:23.5, vh:250 };
+        pg.rect(u.hx, u.hy - 0.25, u.hw, 0.5); pg.rect(u.hx - 0.25, u.hy - 3, 0.5, 6); pg.rect(u.hx + u.hw - 0.25, u.hy - 3, 0.5, 6);
+        pg.rect(u.vx - 0.25, u.vy, 0.5, u.vh); pg.rect(u.vx - 3, u.vy - 0.25, 6, 0.5); pg.rect(u.vx - 3, u.vy + u.vh - 0.25, 6, 0.5);
+        pg.text(u.hx + 2, u.hy - 8.4, 'Ukur: garis mendatar 150 mm, garis tegak 250 mm.', 'F2', 2.6, 0);
+        pg.text(u.hx + 2, u.hy - 5.2, 'Kalau lebih pendek, cetakan dikecilkan oleh printer', 'F1', 2.4, 0);
+        pg.text(u.hx + 2, u.hy - 2.0, 'atau aplikasi cetak: pakai skala 100 % / Actual size.', 'F1', 2.4, 0);
+        pg.text(u.vx + 1.5, u.vy + 3, '250 mm', 'F1', 2.6, 0);
       }
       for (var r = 0; r < L.rows; r++) for (var c = 0; c < L.cols; c++) {
         var k = r * L.cols + c, x = L.ml + c * (L.w + L.gx), y = L.mt + r * (L.h + L.gy);
@@ -922,7 +932,7 @@ var PRESETS = [
   { id:'16', label:'16 label · 105 × 37 mm (2 × 8)', cols:2, rows:8, w:105, h:37, mt:0.5, ml:0, gx:0, gy:0 },
   { id:'14', label:'14 label · 99,1 × 38,1 mm (2 × 7)', cols:2, rows:7, w:99.1, h:38.1, mt:15.15, ml:4.65, gx:2.5, gy:0 },
   { id:'44', label:'44 label · 48,5 × 25,4 mm (4 × 11)', cols:4, rows:11, w:48.5, h:25.4, mt:8.8, ml:8, gx:0, gy:0 },
-  { id:'84', label:'84 label · 32 × 19 mm (Blueprint HVS, 6 × 14) — pakai QR', cols:6, rows:14, w:32, h:19, mt:9, ml:4, gx:1, gy:1, qr:14 },
+  { id:'84', label:'84 label · 32 × 19 mm (Blueprint HVS, 6 × 14) — pakai QR', cols:6, rows:14, w:32, h:19, mt:3, ml:4, gx:2, gy:2, qr:14 },
   { id:'65', label:'65 label · 38,1 × 21,2 mm (5 × 13) — pakai QR', cols:5, rows:13, w:38.1, h:21.2, mt:10.7, ml:4.75, gx:2.5, gy:0, qr:15 },
   { id:'custom', label:'Ukuran sendiri (isi manual)' }
 ];
@@ -934,8 +944,9 @@ function freshState(){
     job:{}, keluar:{ ref:'', tipe:'OUT', alasan:'', lines:[] }, masuk:{ ref:'', tipe:'IN', catatan:'', lines:[] }, pending:{} };
 }
 function load(){ try { var raw = localStorage.getItem(LS_KEY); if (raw) { state = JSON.parse(raw); var f = freshState(); Object.keys(f).forEach(function(k){ if (state[k] === undefined) state[k] = f[k]; }); migrasiLayout(); return; } } catch (e) {} state = freshState(); }
-/* preset 84 (Blueprint 32 × 19) versi awal memakai jarak 2 mm & margin atas 2,5 mm; hasil cetak menunjukkan jaraknya ±1 mm, margin atas 9 mm */
-function migrasiLayout(){ var L = state.layout; if (L && L.preset === '84' && L.mt === 2.5 && L.ml === 4 && L.gx === 2 && L.gy === 2) { L.mt = 9; L.gx = 1; L.gy = 1; } }
+/* preset 84 (Blueprint 32 × 19): angka final mengikuti template resmi Blueprint (Template_GL-A44.docx: kotak 34 × 21 mm mulai 3 mm dari kiri, 2 mm dari atas).
+   Dua versi lama yang pernah tersimpan di browser (2,5/4/2/2 dan 9/4/1/1) diganti otomatis. */
+function migrasiLayout(){ var L = state.layout; if (!L || L.preset !== '84' || L.ml !== 4) return; if ((L.mt === 2.5 && L.gx === 2 && L.gy === 2) || (L.mt === 9 && L.gx === 1 && L.gy === 1)) { L.mt = 3; L.gx = 2; L.gy = 2; } }
 function save(){ try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
 
 /* ===== util ===== */
@@ -1380,6 +1391,7 @@ $('kor-hitung').addEventListener('click', function(){
   if (!t && !b && !l && !r) { out.textContent = 'Semua 0 — tidak ada yang diubah. Isi berapa mm label pojok meleset.'; return; }
   var uTop = $('kor-t-d').value === 'atas' ? t : -t, uBot = $('kor-b-d').value === 'atas' ? b : -b;
   var vLeft = $('kor-l-d').value === 'kiri' ? l : -l, vRight = $('kor-r-d').value === 'kiri' ? r : -r;
+  if ((uTop < 0 && uBot > 0) || (vLeft < 0 && vRight > 0)) { out.textContent = 'Pola ini (tengah pas, makin ke pinggir makin lari ke dalam) berarti cetakan dikecilkan oleh printer/aplikasi cetak, bukan salah tata letak. Saat mencetak pilih skala 100 % / Actual size (bukan Fit), lalu cetak lembar uji lagi dan ukur garis 150 mm-nya.'; return; }
   var R = koreksiLayout(L, uTop, uBot, vLeft, vRight);
   if (R.gx < -0.6 || R.gy < -0.6 || R.mt < 0 || R.ml < 0) { out.textContent = 'Angka tidak masuk akal (label jadi bertumpuk atau keluar kertas). Cek lagi arah meleset dan jumlah mm-nya.'; return; }
   L.mt = R.mt; L.ml = R.ml; L.gx = Math.max(0, R.gx); L.gy = Math.max(0, R.gy); L.preset = 'custom'; L.start = 1;
@@ -1408,11 +1420,23 @@ function labelHtml(p, L){
   var m = moduleMm(p.sku, L), mod = Math.max(0.15, m.mod);
   return '<div class="label' + kecil + '">' + (L.nama ? '<div class="l1">' + esc(p.nama) + '</div>' : '') + (L.varian && line2 ? '<div class="l2">' + esc(line2) + '</div>' : '') + Code128.svg(p.sku, mod, L.barH) + '<div class="l3">' + esc(p.sku) + '</div>' + (extra.length ? '<div class="l4">' + esc(extra.join(' · ')) + '</div>' : '') + '</div>';
 }
+/* Garis ukur di lembar uji: 150 mm mendatar & 250 mm tegak di tengah kertas. Kalau hasil cetak lebih pendek, printer/aplikasi cetak mengecilkan halaman. */
+var UKUR = { hx:30, hy:148.5, hw:150, vx:105, vy:23.5, vh:250 };
+function ukurHtml(){
+  var u = UKUR, h = '';
+  h += '<div class="bar" style="left:' + u.hx + 'mm;top:' + (u.hy - 0.25) + 'mm;width:' + u.hw + 'mm;height:0.5mm"></div>';
+  h += '<div class="bar" style="left:' + (u.hx - 0.25) + 'mm;top:' + (u.hy - 3) + 'mm;width:0.5mm;height:6mm"></div><div class="bar" style="left:' + (u.hx + u.hw - 0.25) + 'mm;top:' + (u.hy - 3) + 'mm;width:0.5mm;height:6mm"></div>';
+  h += '<div class="bar" style="left:' + (u.vx - 0.25) + 'mm;top:' + u.vy + 'mm;width:0.5mm;height:' + u.vh + 'mm"></div>';
+  h += '<div class="bar" style="left:' + (u.vx - 3) + 'mm;top:' + (u.vy - 0.25) + 'mm;width:6mm;height:0.5mm"></div><div class="bar" style="left:' + (u.vx - 3) + 'mm;top:' + (u.vy + u.vh - 0.25) + 'mm;width:6mm;height:0.5mm"></div>';
+  h += '<div class="bartext" style="left:' + (u.hx + 2) + 'mm;top:' + (u.hy - 11) + 'mm"><b>Ukur: garis mendatar 150 mm, garis tegak 250 mm.</b><br>Kalau lebih pendek, cetakan dikecilkan oleh printer<br>atau aplikasi cetak → pakai skala <b>100 % / Actual size</b>.</div>';
+  h += '<div class="bartext" style="left:' + (u.vx + 1.5) + 'mm;top:' + (u.vy + 1) + 'mm">250 mm</div>';
+  return h;
+}
 function buildSheets(L, items, opts){
   opts = opts || {}; var per = L.cols * L.rows, startIdx = Math.max(0, (L.start || 1) - 1), pages = opts.calib ? 1 : Math.max(1, Math.ceil((startIdx + items.length) / per)), html = '', idx = 0;
   for (var pg = 0; pg < pages; pg++) {
     html += '<div class="sheet' + (opts.calib ? ' calib' : '') + (opts.grid ? ' show-grid' : '') + '">';
-    if (opts.calib) { for (var mmv = 5; mmv <= 205; mmv += 5) { var big = mmv % 10 === 0; html += '<div class="tick" style="left:' + mmv + 'mm;top:0;width:0.2mm;height:' + (big ? 3 : 1.5) + 'mm"></div>' + (big ? '<div class="ticklabel" style="left:' + (mmv + 0.4) + 'mm;top:0.2mm">' + mmv + '</div>' : ''); } for (var mmh = 5; mmh <= 292; mmh += 5) { var big2 = mmh % 10 === 0; html += '<div class="tick" style="top:' + mmh + 'mm;left:0;height:0.2mm;width:' + (big2 ? 3 : 1.5) + 'mm"></div>' + (big2 ? '<div class="ticklabel" style="top:' + (mmh - 2.2) + 'mm;left:0.4mm">' + mmh + '</div>' : ''); } }
+    if (opts.calib) { html += ukurHtml(); for (var mmv = 5; mmv <= 205; mmv += 5) { var big = mmv % 10 === 0; html += '<div class="tick" style="left:' + mmv + 'mm;top:0;width:0.2mm;height:' + (big ? 3 : 1.5) + 'mm"></div>' + (big ? '<div class="ticklabel" style="left:' + (mmv + 0.4) + 'mm;top:0.2mm">' + mmv + '</div>' : ''); } for (var mmh = 5; mmh <= 292; mmh += 5) { var big2 = mmh % 10 === 0; html += '<div class="tick" style="top:' + mmh + 'mm;left:0;height:0.2mm;width:' + (big2 ? 3 : 1.5) + 'mm"></div>' + (big2 ? '<div class="ticklabel" style="top:' + (mmh - 2.2) + 'mm;left:0.4mm">' + mmh + '</div>' : ''); } }
     for (var r = 0; r < L.rows; r++) for (var c = 0; c < L.cols; c++) {
       var n = r * L.cols + c, left = L.ml + c * (L.w + L.gx), top = L.mt + r * (L.h + L.gy), pos = 'left:' + left.toFixed(3) + 'mm;top:' + top.toFixed(3) + 'mm;width:' + L.w + 'mm;height:' + L.h + 'mm;';
       var skip = (pg === 0 && n < startIdx), item = (!opts.calib && !skip && idx < items.length) ? items[idx] : null;
@@ -1474,7 +1498,7 @@ function unduhPdf(calib){
   try { bytes = pdfBytes(calib); } catch (e) { toast('Gagal membuat PDF: ' + e.message, true); return; }
   if (!calib) { var now = new Date().toISOString(), ubah = []; jobList().forEach(function(j){ if (!j.p.cmd && !j.p.dicetakPada) { j.p.dicetakPada = now; ubah.push(pRaw(j.p)); } }); if (ubah.length && state.server.role === 'admin') api('produk_simpan', { produk:ubah, n:150 }, uid()).catch(function(){}); save(); renderProduk(); }
   download(calib ? 'lembar-uji-label-APB.pdf' : 'label-APB-' + todayStr() + '.pdf', bytes, 'application/pdf');
-  toast(calib ? 'Lembar uji diunduh. Cetak skala 100%, margin None, lalu bandingkan dengan stiker.' : 'PDF label diunduh. Cetak dengan skala 100%, margin None.');
+  toast(calib ? 'Lembar uji diunduh. Cetak dengan skala 100 % / Actual size, lalu ukur garis 150 mm-nya.' : 'PDF label diunduh. Cetak dengan skala 100 % / Actual size (bukan Fit).');
 }
 $('btn-pdf').addEventListener('click', function(){ unduhPdf(false); });
 $('btn-pdf-uji').addEventListener('click', function(){ unduhPdf(true); });
