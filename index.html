@@ -358,7 +358,9 @@ details li{margin:4px 0}
       <div class="toolbar">
         <h2>Cetak label stiker A4</h2>
         <span class="spacer"></span>
-        <button class="btn" id="btn-cetak-uji">Cetak lembar uji (kotak kosong)</button>
+        <button class="btn" id="btn-pdf-uji">Unduh lembar uji (PDF)</button>
+        <button class="btn" id="btn-cetak-uji">Cetak lembar uji</button>
+        <button class="btn" id="btn-pdf">Unduh PDF</button>
         <button class="btn primary" id="btn-cetak">Cetak sekarang</button>
       </div>
       <div class="cetak">
@@ -410,6 +412,7 @@ details li{margin:4px 0}
                 <li>Margin: <b>Tidak ada / None</b>.</li>
                 <li>Matikan header &amp; footer.</li>
                 <li>Pertama kali: cetak lembar uji di kertas biasa, tumpuk di atas stiker, terawang ke cahaya.</li>
+                <li>Tombol <b>Unduh PDF</b> menyimpan file yang sama untuk dicetak nanti atau di tempat lain — tetap cetak dengan skala 100%.</li>
               </ol>
             </details>
           </div>
@@ -757,6 +760,139 @@ var QR = (function () {
   return { build: build, svg: svg };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = QR;
+
+/* Penulis PDF mini untuk lembar label: kotak (QR / barcode), teks Helvetica & Courier, garis putus-putus. Satuan masuk: mm. */
+var PdfLabel = (function () {
+  var PT = 72 / 25.4, PAGE_W = 210, PAGE_H = 297;
+  var W_HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+  var W_HELVB = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
+  var FONTS = { F1: 'Helvetica', F2: 'Helvetica-Bold', F3: 'Courier-Bold' };
+
+  function width(text, font, sizeMm, spacingMm) {
+    var w = 0;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i), u;
+      if (font === 'F3') u = 600; else { var t = font === 'F2' ? W_HELVB : W_HELV; u = (c >= 32 && c <= 126) ? t[c - 32] : (c === 0xB7 ? 278 : 556); }
+      w += u / 1000 * sizeMm + (spacingMm || 0);
+    }
+    return w;
+  }
+  function esc(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      if (c === 0x2022) c = 0x95; else if (c === 0x2026) c = 0x85; else if (c === 0x2013) c = 0x96; else if (c === 0x2014) c = 0x97;
+      if (c > 255) c = 63;
+      var ch = String.fromCharCode(c);
+      if (ch === '(' || ch === ')' || ch === '\\') out += '\\' + ch; else if (c < 32) out += ' '; else out += ch;
+    }
+    return out;
+  }
+  function fit(text, font, sizeMm, maxMm, spacing) {
+    if (width(text, font, sizeMm, spacing) <= maxMm) return text;
+    var t = text;
+    while (t.length > 1 && width(t + '…', font, sizeMm, spacing) > maxMm) t = t.slice(0, -1);
+    return t + '…';
+  }
+  function wrap2(text, font, sizeMm, maxMm) {
+    if (width(text, font, sizeMm) <= maxMm) return [text];
+    var words = text.split(' '), line1 = '', i = 0;
+    while (i < words.length) { var cand = line1 ? line1 + ' ' + words[i] : words[i]; if (width(cand, font, sizeMm) > maxMm) break; line1 = cand; i++; }
+    if (!line1) { line1 = fit(words[0], font, sizeMm, maxMm); i = 1; }
+    var rest = words.slice(i).join(' ');
+    return rest ? [line1, fit(rest, font, sizeMm, maxMm)] : [line1];
+  }
+  function n(v) { return (Math.round(v * 1000) / 1000).toString(); }
+
+  function Page() { this.ops = []; }
+  Page.prototype.rect = function (x, y, w, h) { this.ops.push(n(x * PT) + ' ' + n((PAGE_H - y - h) * PT) + ' ' + n(w * PT) + ' ' + n(h * PT) + ' re f'); };
+  Page.prototype.dashRect = function (x, y, w, h, lineMm) { this.ops.push('q [' + n(1 * PT) + ' ' + n(1 * PT) + '] 0 d ' + n(lineMm * PT) + ' w 0.5 G ' + n(x * PT) + ' ' + n((PAGE_H - y - h) * PT) + ' ' + n(w * PT) + ' ' + n(h * PT) + ' re S Q'); };
+  Page.prototype.text = function (x, yBaseline, str, font, sizeMm, spacingMm, gray) {
+    this.ops.push('BT /' + font + ' ' + n(sizeMm * PT) + ' Tf ' + (spacingMm ? n(spacingMm * PT) + ' Tc ' : '0 Tc ') + (gray ? n(gray) + ' g ' : '0 g ') + n(x * PT) + ' ' + n((PAGE_H - yBaseline) * PT) + ' Td (' + esc(str) + ') Tj ET');
+  };
+  Page.prototype.textCenter = function (cx, yBaseline, str, font, sizeMm, spacingMm) { this.text(cx - width(str, font, sizeMm, spacingMm) / 2, yBaseline, str, font, sizeMm, spacingMm); };
+
+  function build(pages) {
+    var objs = [], offsets = [];
+    function add(s) { objs.push(s); return objs.length; }
+    add('<< /Type /Catalog /Pages 2 0 R >>');
+    add(''); /* pages, diisi nanti */
+    var fontIds = {};
+    Object.keys(FONTS).forEach(function (k) { fontIds[k] = add('<< /Type /Font /Subtype /Type1 /BaseFont /' + FONTS[k] + ' /Encoding /WinAnsiEncoding >>'); });
+    var fontRes = '<< ' + Object.keys(FONTS).map(function (k) { return '/' + k + ' ' + fontIds[k] + ' 0 R'; }).join(' ') + ' >>';
+    var pageIds = [];
+    pages.forEach(function (pg) {
+      var content = pg.ops.join('\n');
+      var cid = add('<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream');
+      pageIds.push(add('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + n(PAGE_W * PT) + ' ' + n(PAGE_H * PT) + '] /Resources << /Font ' + fontRes + ' >> /Contents ' + cid + ' 0 R >>'));
+    });
+    objs[1] = '<< /Type /Pages /Kids [' + pageIds.map(function (id) { return id + ' 0 R'; }).join(' ') + '] /Count ' + pageIds.length + ' >>';
+    var out = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
+    objs.forEach(function (o, i) { offsets.push(out.length); out += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+    var xref = out.length;
+    out += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n';
+    offsets.forEach(function (off) { out += ('0000000000' + off).slice(-10) + ' 00000 n \n'; });
+    out += 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n';
+    var bytes = new Uint8Array(out.length);
+    for (var i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xFF;
+    return bytes;
+  }
+
+  /* Gambar satu label di (x,y). opts: { kode:'qr'|'code128', kecil, barH, nama, varian, harga, rak, qrSide } */
+  function drawLabel(pg, x, y, w, h, p, L, enc) {
+    var kecil = L.teks === 'kecil', line2 = [p.varian, p.ukuranTeks].filter(Boolean).join(' · ');
+    var extra = []; if (L.harga && p.harga != null) extra.push(p.hargaTeks); if (L.rak && p.rak) extra.push(p.rak);
+    if (enc.kind === 'qr') {
+      var side = enc.sideMm, mod = side / enc.total, qx = x + 1.2, qy = y + (h - side) / 2, q = enc.q;
+      for (var r = 0; r < q.size; r++) for (var c = 0; c < q.size; c++) if (q.modules[r][c]) pg.rect(qx + (c + 2) * mod, qy + (r + 2) * mod, mod + 0.02, mod + 0.02);
+      var tx = qx + side + 1.0, tw = w - 1.2 - side - 1.0 - 1.2;
+      var s1 = kecil ? 1.9 : 2.1, s2 = kecil ? 1.7 : 1.85, s3 = kecil ? 1.8 : 2.0, s4 = 1.8, lines = [];
+      if (L.nama) wrap2(p.nama, 'F2', s1, tw).forEach(function (t) { lines.push([t, 'F2', s1, 0]); });
+      if (L.varian && line2) lines.push([fit(line2, 'F1', s2, tw), 'F1', s2, 0]);
+      lines.push([fit(p.sku, 'F3', s3, tw, 0.2), 'F3', s3, 0.2]);
+      if (extra.length) lines.push([fit(extra.join(' · '), 'F1', s4, tw), 'F1', s4, 0]);
+      var total = lines.reduce(function (s, l) { return s + l[2] * 1.2; }, 0), cy = y + (h - total) / 2;
+      lines.forEach(function (l) { pg.text(tx, cy + l[2] * 0.95, l[0], l[1], l[2], l[3]); cy += l[2] * 1.2; });
+    } else {
+      var s1v = kecil ? 2.5 : 3, s2v = kecil ? 2.1 : 2.5, s3v = kecil ? 2.1 : 2.5, s4v = kecil ? 2.0 : 2.3, sp = kecil ? 0.25 : 0.35, inner = w - 3;
+      var rows = [];
+      if (L.nama) rows.push({ t: fit(p.nama, 'F2', s1v, inner), f: 'F2', s: s1v, lh: s1v * 1.15 });
+      if (L.varian && line2) rows.push({ t: fit(line2, 'F1', s2v, inner), f: 'F1', s: s2v, lh: s2v * 1.15 + 0.6 });
+      rows.push({ bars: true, lh: L.barH });
+      rows.push({ t: p.sku, f: 'F3', s: s3v, sp: sp, lh: s3v * 1.15 + 0.5 });
+      if (extra.length) rows.push({ t: fit(extra.join(' · '), 'F1', s4v, inner), f: 'F1', s: s4v, lh: s4v * 1.15 + 0.3 });
+      var tot = rows.reduce(function (s, r) { return s + r.lh; }, 0), cyv = y + (h - tot) / 2, cx = x + w / 2;
+      rows.forEach(function (r) {
+        if (r.bars) { var bw = enc.widthMm, bx = cx - bw / 2 + enc.quietMm; enc.bars.forEach(function (b) { pg.rect(bx + b.x * enc.mod, cyv, b.w * enc.mod, L.barH); }); }
+        else pg.textCenter(cx, cyv + r.s * 0.95, r.t, r.f, r.s, r.sp || 0);
+        cyv += r.lh;
+      });
+    }
+  }
+
+  /* items: daftar {p, enc}; L: tata letak; opts: {calib, grid} */
+  function sheets(L, items, opts) {
+    opts = opts || {}; var per = L.cols * L.rows, startIdx = Math.max(0, (L.start || 1) - 1);
+    var nPages = opts.calib ? 1 : Math.max(1, Math.ceil((startIdx + items.length) / per)), pages = [], idx = 0;
+    for (var pgI = 0; pgI < nPages; pgI++) {
+      var pg = new Page();
+      if (opts.calib) {
+        for (var mmv = 5; mmv <= 205; mmv += 5) { var big = mmv % 10 === 0; pg.rect(mmv, 0, 0.2, big ? 3 : 1.5); if (big) pg.text(mmv + 0.5, 2.2, String(mmv), 'F1', 2, 0, 0.35); }
+        for (var mmh = 5; mmh <= 292; mmh += 5) { var big2 = mmh % 10 === 0; pg.rect(0, mmh, big2 ? 3 : 1.5, 0.2); if (big2) pg.text(0.6, mmh - 0.6, String(mmh), 'F1', 2, 0, 0.35); }
+      }
+      for (var r = 0; r < L.rows; r++) for (var c = 0; c < L.cols; c++) {
+        var k = r * L.cols + c, x = L.ml + c * (L.w + L.gx), y = L.mt + r * (L.h + L.gy);
+        if (opts.calib) { pg.dashRect(x, y, L.w, L.h, 0.2); pg.text(x + 1, y + 2.6, String(k + 1), 'F1', 2.2, 0, 0.3); continue; }
+        var skip = (pgI === 0 && k < startIdx);
+        if (!skip && idx < items.length) { drawLabel(pg, x, y, L.w, L.h, items[idx].p, L, items[idx].enc); idx++; }
+      }
+      pages.push(pg);
+    }
+    return build(pages);
+  }
+  return { sheets: sheets, build: build, Page: Page, width: width };
+})();
+if (typeof module !== 'undefined' && module.exports) module.exports = PdfLabel;
 
 </script>
 <script>
@@ -1284,6 +1420,28 @@ $('btn-cetak').addEventListener('click', function(){
   save(); renderProduk(); doPrint(buildSheets(state.layout, items));
 });
 $('btn-cetak-uji').addEventListener('click', function(){ doPrint(buildSheets(state.layout, [], { calib:true })); });
+/* --- PDF yang bisa diunduh (dibuat di dalam aplikasi) --- */
+function encUntuk(p, L, cache){
+  if (cache[p.sku]) return cache[p.sku];
+  var e;
+  if (jenisKode(L) === 'qr') { var q = QR.build(p.sku), qm = qrMm(p.sku, L); e = { kind:'qr', q:q, total:q.size + 4, sideMm:qm.sideMm }; }
+  else { var m = moduleMm(p.sku, L), mod = Math.max(0.15, m.mod), c = Code128.encode(p.sku); e = { kind:'code128', bars:c.bars, mod:mod, widthMm:mod * (c.width + 20), quietMm:10 * mod }; }
+  cache[p.sku] = e; return e;
+}
+function pdfBytes(calib){
+  var L = state.layout, cache = {}, items = calib ? [] : expandJob().map(function(p){ return { p:{ nama:p.nama, varian:p.varian, ukuranTeks:ukuranText(p), sku:p.sku, harga:p.harga, hargaTeks:fmtRp(p.harga), rak:p.rak }, enc:encUntuk(p, L, cache) }; });
+  return PdfLabel.sheets(L, items, { calib:calib });
+}
+function unduhPdf(calib){
+  if (!calib && !expandJob().length) { toast('Isi dulu jumlah stiker.', true); return; }
+  var bytes;
+  try { bytes = pdfBytes(calib); } catch (e) { toast('Gagal membuat PDF: ' + e.message, true); return; }
+  if (!calib) { var now = new Date().toISOString(), ubah = []; jobList().forEach(function(j){ if (!j.p.cmd && !j.p.dicetakPada) { j.p.dicetakPada = now; ubah.push(pRaw(j.p)); } }); if (ubah.length && state.server.role === 'admin') api('produk_simpan', { produk:ubah, n:150 }, uid()).catch(function(){}); save(); renderProduk(); }
+  download(calib ? 'lembar-uji-label-APB.pdf' : 'label-APB-' + todayStr() + '.pdf', bytes, 'application/pdf');
+  toast(calib ? 'Lembar uji diunduh. Cetak di kertas biasa, skala 100%.' : 'PDF label diunduh. Cetak dengan skala 100%, margin None.');
+}
+$('btn-pdf').addEventListener('click', function(){ unduhPdf(false); });
+$('btn-pdf-uji').addEventListener('click', function(){ unduhPdf(true); });
 window.addEventListener('afterprint', function(){ $('print-root').innerHTML = ''; });
 
 /* ===== PENGATURAN ===== */
@@ -1330,7 +1488,7 @@ var siap = !!(state.server.pin && (state.server.url || viaGoogle()));
 if (!siap) startTab = 'pengaturan';
 showTab(startTab);
 if (siap) sync().catch(function(e){ toast(e.message, true); });
-window.APB = { state:function(){ return state; }, api:api, sync:sync, buildSheets:buildSheets, Code128:Code128 };
+window.APB = { state:function(){ return state; }, api:api, sync:sync, buildSheets:buildSheets, Code128:Code128, QR:QR, pdfBytes:pdfBytes };
 })();
 </script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js'"></script>
