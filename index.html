@@ -244,7 +244,7 @@ details li{margin:4px 0}
 
     <!-- ===== KELUAR ===== -->
     <section class="panel" id="tab-keluar" hidden>
-      <div class="card-h"><h2>Barang keluar</h2><span class="muted small">Scan resi dulu, lalu scan produk satu per satu. Batch dipilih otomatis (expiry terdekat keluar dulu).</span></div>
+      <div class="card-h"><h2>Barang keluar</h2><span class="muted small">Scan resi dulu, lalu scan produk satu per satu — setiap pcs harus discan, jumlah penjualan tidak bisa diketik. Batch dipilih otomatis (expiry terdekat keluar dulu).</span></div>
       <div class="card">
         <div class="radio-row">
           <label class="check"><input type="radio" name="k-tipe" value="OUT" checked> Penjualan / kirim</label>
@@ -1109,13 +1109,17 @@ function renderKeluar(){
     var opsi = '<select data-i="' + i + '" data-k="batch" style="width:auto;max-width:180px;margin-top:4px"><option value="auto"' + (l.batch === 'auto' ? ' selected' : '') + '>otomatis (FEFO)</option>' + bs.map(function(b){ return '<option value="' + esc(b.batch) + '"' + (l.batch === b.batch ? ' selected' : '') + ((tipe === 'OUT' || tipe === 'PAKAI') && (b.expired || b.karantina) ? ' disabled' : '') + '>' + esc(b.batch) + ' · ' + fmtNum(b.qty) + (b.expired ? ' (expired)' : b.karantina ? ' (karantina)' : '') + '</option>'; }).join('') + '</select>';
     var isiL = (l.batch !== 'auto' ? (bs.filter(function(b){ return b.batch === l.batch; })[0] || {}).isi : 0) || (p.isiKardus || 0) || (bs[0] && bs[0].isi) || 0;
     var tombolKardus = isiL > 0 ? '<br><button class="btn sm" data-i="' + i + '" data-k="kardus" data-isi="' + isiL + '" title="tambah 1 kardus = ' + isiL + ' pcs">+1 kardus (' + fmtNum(isiL) + ')</button>' : '';
-    return '<tr><td class="mono"><b>' + esc(l.sku) + '</b></td><td>' + esc(displayName(p)) + '</td><td class="num"><input type="number" class="qty" min="1" step="1" value="' + l.qty + '" data-i="' + i + '" data-k="qty">' + (isiL > 0 ? '<br><span class="muted small">' + esc(fmtKardus(l.qty, isiL) || '') + '</span>' : '') + tombolKardus + '</td><td>' + batchCell + '<br>' + opsi + '</td><td class="num">' + fmtNum(ada) + (isiL > 0 ? '<br><span class="muted small">' + esc(fmtKardus(ada, isiL)) + '</span>' : '') + '</td><td class="actions"><button class="btn sm" data-i="' + i + '" data-k="hapus">✕</button></td></tr>';
+    /* penjualan: jumlah hanya dari scan (tiap pcs discan), tidak bisa diketik; −1 untuk membatalkan satu scan yang salah */
+    var qtyCell = tipe === 'OUT'
+      ? '<b class="qtyval" data-qty="' + l.qty + '">' + fmtNum(l.qty) + '</b>' + (isiL > 0 ? '<br><span class="muted small">' + esc(fmtKardus(l.qty, isiL) || '') + '</span>' : '') + '<br><button class="btn sm" data-i="' + i + '" data-k="kurang" title="batalkan satu scan">−1</button>'
+      : '<input type="number" class="qty" min="1" step="1" value="' + l.qty + '" data-i="' + i + '" data-k="qty">' + (isiL > 0 ? '<br><span class="muted small">' + esc(fmtKardus(l.qty, isiL) || '') + '</span>' : '') + tombolKardus;
+    return '<tr><td class="mono"><b>' + esc(l.sku) + '</b></td><td>' + esc(displayName(p)) + '</td><td class="num">' + qtyCell + '</td><td>' + batchCell + '<br>' + opsi + '</td><td class="num">' + fmtNum(ada) + (isiL > 0 ? '<br><span class="muted small">' + esc(fmtKardus(ada, isiL)) + '</span>' : '') + '</td><td class="actions"><button class="btn sm" data-i="' + i + '" data-k="hapus">✕</button></td></tr>';
   }).join('') || '<tr><td colspan="6" class="muted">Belum ada barang. Scan produk.</td></tr>';
   $('k-summary').textContent = K.lines.length ? K.lines.length + ' produk · ' + fmtNum(total) + ' pcs' + (K.ref ? ' · ref ' + K.ref : '') : '';
 }
 $('k-body').addEventListener('input', function(e){ var el = e.target; if (el.dataset.k !== 'qty') return; var i = Number(el.dataset.i), L = state.keluar.lines[i]; if (!L) return; var v = parseInt(el.value, 10); if (v > 0) L.qty = v; save(); renderKeluar(); var q = $('k-body').querySelector('input[data-i="' + i + '"]'); if (q) { q.focus(); } });
 $('k-body').addEventListener('change', function(e){ var el = e.target, i = Number(el.dataset.i), L = state.keluar.lines[i]; if (!L) return; if (el.dataset.k === 'batch') { L.batch = el.value; save(); renderKeluar(); } });
-$('k-body').addEventListener('click', function(e){ var kb = e.target.closest('button[data-k="kardus"]'); if (kb) { var LK = state.keluar.lines[Number(kb.dataset.i)]; if (LK) { LK.qty += Number(kb.dataset.isi) || 0; save(); renderKeluar(); } return; } var b = e.target.closest('button[data-k="hapus"]'); if (!b) return; state.keluar.lines.splice(Number(b.dataset.i), 1); save(); renderKeluar(); $('k-scan').focus(); });
+$('k-body').addEventListener('click', function(e){ var kr = e.target.closest('button[data-k="kurang"]'); if (kr) { var i0 = Number(kr.dataset.i), L0 = state.keluar.lines[i0]; if (L0) { L0.qty -= 1; if (L0.qty <= 0) state.keluar.lines.splice(i0, 1); save(); renderKeluar(); $('k-scan').focus(); } return; } var kb = e.target.closest('button[data-k="kardus"]'); if (kb) { var LK = state.keluar.lines[Number(kb.dataset.i)]; if (LK) { LK.qty += Number(kb.dataset.isi) || 0; save(); renderKeluar(); } return; } var b = e.target.closest('button[data-k="hapus"]'); if (!b) return; state.keluar.lines.splice(Number(b.dataset.i), 1); save(); renderKeluar(); $('k-scan').focus(); });
 $('k-body').addEventListener('keydown', function(e){ if (e.key === 'Enter' && e.target.dataset.k === 'qty') { e.preventDefault(); $('k-scan').focus(); } });
 document.querySelectorAll('input[name=k-tipe]').forEach(function(r){ r.addEventListener('change', function(){ state.keluar.tipe = kTipe(); save(); renderKeluar(); }); });
 $('k-ref').addEventListener('input', function(){ state.keluar.ref = this.value.trim(); save(); renderKeluar(); });
@@ -1586,7 +1590,7 @@ var siap = !!(state.server.pin && (state.server.url || viaGoogle()));
 if (!siap) startTab = 'pengaturan';
 showTab(startTab);
 if (siap) sync().catch(function(e){ toast(e.message, true); });
-window.APB = { state:function(){ return state; }, api:api, sync:sync, buildSheets:buildSheets, Code128:Code128, QR:QR, pdfBytes:pdfBytes, koreksiLayout:koreksiLayout, PRESETS:PRESETS };
+window.APB = { state:function(){ return state; }, api:api, sync:sync, buildSheets:buildSheets, Code128:Code128, QR:QR, pdfBytes:pdfBytes, koreksiLayout:koreksiLayout, PRESETS:PRESETS, tambahKeluar:tambahKeluar };
 })();
 </script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js'"></script>
