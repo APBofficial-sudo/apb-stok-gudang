@@ -1220,6 +1220,12 @@ function kirim(jenis, data, idemLama){
     else { state.masuk = { ref:'', tipe:mTipe(), catatan:'', lines:[] }; $('m-ref').value = ''; $('m-catatan').value = ''; renderMasuk(); mMsg(pesan); $('m-ref').focus(); }
     save(); toast('Tersimpan ke spreadsheet.'); beep(true);
   }).catch(function(e){
+    if (/sama persis sudah tersimpan/.test(e.message)) {
+      /* catatan pertamanya sudah masuk — kosongkan daftar supaya tidak disimpan lagi */
+      if (jenis === 'keluar') { state.keluar = { ref:'', tipe:kTipe(), alasan:'', lines:[] }; $('k-ref').value = ''; $('k-alasan').value = ''; renderKeluar(); $('k-ref').focus(); }
+      else { state.masuk = { ref:'', tipe:mTipe(), catatan:'', lines:[] }; $('m-ref').value = ''; $('m-catatan').value = ''; renderMasuk(); $('m-ref').focus(); }
+      save(); msgFn('Sudah tersimpan sebelumnya — tidak disimpan dua kali. ' + e.message, true); beep(false); sync().catch(function(){}); return;
+    }
     msgFn('Gagal: ' + e.message, true); beep(false);
     if (/menghubungi|menjawab/.test(e.message)) { pend.innerHTML = '<div class="note warn">Data belum terkirim dan masih tersimpan di perangkat ini. <button class="btn sm" id="retry-' + jenis + '">Coba kirim lagi</button> <span class="muted small">(aman dikirim ulang, tidak akan dobel)</span></div>'; $('retry-' + jenis).addEventListener('click', function(){ kirim(jenis, data, idem); }); }
   }).finally(function(){ btn.disabled = false; btn.textContent = jenis === 'keluar' ? 'Simpan keluar' : 'Simpan masuk'; });
