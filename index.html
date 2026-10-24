@@ -931,6 +931,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PdfLabel;
 'use strict';
 var LS_KEY = 'apb.stok.fase2.v1';
 var HOSTED_URL = 'https://apbofficial-sudo.github.io/apb-stok-gudang/';
+var APP_VERSI = '2026-10-24';
 var DEFAULT_KAT = [{ kode:'PF', nama:'Parfum' }, { kode:'SK', nama:'Skincare' }, { kode:'HC', nama:'Hair & Body' }, { kode:'BN', nama:'Bonus' }, { kode:'KM', nama:'Kemasan & bahan' }];
 var CMD = { 'CMD-SIMPAN': { sku:'CMD-SIMPAN', nama:'SIMPAN', varian:'label perintah untuk scanner', ukuran:null, satuan:'', kat:'CMD', aktif:true, cmd:true }, 'CMD-BATAL': { sku:'CMD-BATAL', nama:'BATAL', varian:'label perintah untuk scanner', ukuran:null, satuan:'', kat:'CMD', aktif:true, cmd:true } };
 var PRESETS = [
@@ -1553,7 +1554,7 @@ function shareLink(){ return HOSTED_URL + '#s=' + b64url(execUrl()); }
 $('s-share-copy').addEventListener('click', function(){ var el = $('s-share-link'); el.select(); var done = function(){ toast('Tautan disalin.'); }; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(el.value).then(done, function(){ try { document.execCommand('copy'); done(); } catch (e) {} }); else { try { document.execCommand('copy'); done(); } catch (e) {} } });
 function renderPengaturan(){
   var gas = viaGoogle();
-  var bisaBagi = !!execUrl() && state.online; $('s-share').hidden = !bisaBagi; if (bisaBagi) $('s-share-link').value = shareLink(); $('s-url-wrap').hidden = gas; $('s-intro').textContent = gas ? 'Halaman ini dibuka dari link Apps Script, jadi alamat server sudah otomatis. Isi PIN (dari tab PENGATURAN di spreadsheet) dan nama petugas.' : 'Alamat web app dari Apps Script (berakhiran /exec), PIN dari tab PENGATURAN di spreadsheet, dan nama petugas yang memakai perangkat ini.';
+  var bisaBagi = !!execUrl() && state.online; $('s-share').hidden = !bisaBagi; if (bisaBagi) $('s-share-link').value = shareLink(); $('s-url-wrap').hidden = gas; $('s-intro').textContent = (gas ? 'Halaman ini dibuka dari link Apps Script, jadi alamat server sudah otomatis. Isi PIN (dari tab PENGATURAN di spreadsheet) dan nama petugas.' : 'Alamat web app dari Apps Script (berakhiran /exec), PIN dari tab PENGATURAN di spreadsheet, dan nama petugas yang memakai perangkat ini.') + ' Aplikasi versi ' + APP_VERSI + (state.cache && state.cache.versi ? ' · server versi ' + state.cache.versi : '') + '.';
   $('s-url').value = state.server.url; $('s-pin').value = state.server.pin; $('s-petugas').value = state.server.petugas;
   $('s-status').innerHTML = (state.server.url || gas) ? (state.online ? '<div class="note ok">Tersambung ke <b>' + esc(state.server.nama_gudang || 'server') + '</b> sebagai <b>' + esc(state.server.petugas) + '</b> (' + esc(state.server.role) + ').' + (state.lastSync ? ' Data terakhir ' + fmtWaktu(state.lastSync) + '.' : '') + '</div>' + (state.cache && state.cache.versi < 3 ? '<div class="note warn" style="margin-top:8px">Server (Code.gs) masih versi lama. Fitur <b>isi per kardus</b> dan <b>dipakai produksi / ke maklon</b> baru aktif setelah Code.gs terbaru ditempel di Apps Script dan di-deploy sebagai versi baru.</div>' : '') : '<div class="note warn">Alamat tersimpan, tapi sambungan terakhir gagal. Klik Sambungkan untuk mencoba lagi.</div>') : '';
   $('s-admin-card').hidden = !((state.server.url || gas) && state.server.role === 'admin');
