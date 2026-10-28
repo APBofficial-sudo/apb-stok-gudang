@@ -541,6 +541,25 @@ details li{margin:4px 0}
     </form>
   </dialog>
 
+  <dialog id="dlg-lepas">
+    <form method="dialog" id="form-lepas">
+      <div class="dlg-h"><h3 id="dlg-lepas-title">Lepas karantina</h3><button type="button" class="btn sm" id="dlg-lepas-close">Tutup</button></div>
+      <div class="dlg-b">
+        <p class="small muted">Barang retur yang sudah diperiksa dan layak dijual dipindahkan dari batch karantina ke batch jual. Tercatat sebagai dua baris koreksi (keluar dari karantina, masuk ke batch tujuan) dengan alasan di bawah. Yang rusak jangan dilepas — catat lewat Keluar → "Rusak, expired, tester, konten".</p>
+        <div class="grid g2">
+          <label class="f">Jumlah yang dilepas (pcs) <input type="number" id="lp-qty" min="1" step="1"></label>
+          <label class="f">Pindah ke batch <select id="lp-batch"></select></label>
+        </div>
+        <div class="grid g2" id="lp-baru" hidden>
+          <label class="f">Kode batch baru <input type="text" id="lp-batch-baru" placeholder="dari kemasan" autocomplete="off" autocapitalize="characters"></label>
+          <label class="f">Expiry batch baru <input type="date" id="lp-expiry"></label>
+        </div>
+        <label class="f">Kondisi / alasan (wajib) <input type="text" id="lp-alasan" placeholder="mis. segel utuh, kemasan baik — layak jual" autocomplete="off"></label>
+        <div id="lp-err" class="note danger" hidden></div>
+      </div>
+      <div class="dlg-f"><span class="spacer"></span><button type="button" class="btn" id="lp-batal">Batal</button><button type="submit" class="btn primary" id="lp-simpan">Lepaskan ke stok jual</button></div>
+    </form>
+  </dialog>
   <dialog id="dlg-impor">
     <div class="dlg-h"><h3>Impor produk</h3><button type="button" class="btn sm" id="dlg-impor-close">Tutup</button></div>
     <div class="dlg-b">
@@ -1080,10 +1099,41 @@ function renderCek(sku){
   box.innerHTML = '<span class="big">' + esc(displayName(p)) + '</span><span class="mono">' + esc(p.sku) + '</span>' +
     '<div class="stat"><div><b>' + fmtNum(total) + '</b><span>stok total</span></div>' + (kt != null ? '<div><b>' + fmtNum(kt) + '</b><span>kardus</span></div>' : '') + '<div><b>' + fmtNum(p.stokMin) + '</b><span>stok minimum</span></div><div><b>' + bs.length + '</b><span>batch</span></div></div>' +
     '<span class="small">' + status + ' ' + esc(katNama(p.kat)) + (p.rak ? ' · rak ' + esc(p.rak) : '') + (p.harga != null ? ' · ' + fmtRp(p.harga) : '') + '</span>';
-  $('cek-batch').innerHTML = bs.length ? '<div class="table-wrap"><table><thead><tr><th>Batch</th><th>Expiry</th><th>Sisa hari</th><th class="num">Stok</th><th>Kardus</th><th></th></tr></thead><tbody>' + bs.map(function(b){ return '<tr><td class="mono">' + esc(b.batch) + '</td><td>' + fmtTgl(b.expiry) + '</td><td>' + (b.hari == null ? '—' : fmtNum(b.hari)) + '</td><td class="num">' + fmtNum(b.qty) + '</td><td class="small">' + esc(fmtKardus(b.qty, b.isi) || '—') + '</td><td>' + badgeBatch(b) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="muted small">Belum ada stok untuk produk ini.</p>';
+  $('cek-batch').innerHTML = bs.length ? '<div class="table-wrap"><table><thead><tr><th>Batch</th><th>Expiry</th><th>Sisa hari</th><th class="num">Stok</th><th>Kardus</th><th></th></tr></thead><tbody>' + bs.map(function(b){ return '<tr><td class="mono">' + esc(b.batch) + '</td><td>' + fmtTgl(b.expiry) + '</td><td>' + (b.hari == null ? '—' : fmtNum(b.hari)) + '</td><td class="num">' + fmtNum(b.qty) + '</td><td class="small">' + esc(fmtKardus(b.qty, b.isi) || '—') + '</td><td>' + badgeBatch(b) + tombolLepas(p.sku, b) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="muted small">Belum ada stok untuk produk ini.</p>';
   $('cek-actions').hidden = false;
 }
+function tombolLepas(sku, b){ return (b.karantina && b.qty > 0 && state.server.role === 'admin') ? ' <button class="btn sm" data-lepas="' + esc(sku) + '" data-batch="' + esc(b.batch) + '" data-qty="' + b.qty + '">Lepas karantina</button>' : ''; }
 function badgeBatch(b){ if (b.karantina) return '<span class="badge warn">karantina</span>'; if (b.expired) return '<span class="badge off">expired</span>'; if (b.hari != null && b.hari <= alertHari()) return '<span class="badge gold">≤ ' + alertHari() + ' hari</span>'; return ''; }
+/* ===== LEPAS KARANTINA (admin): satu permintaan ADJUST berisi −n dari batch karantina dan +n ke batch tujuan ===== */
+var lepas = { sku:null, dari:null, max:0 };
+function openLepas(sku, dari, qty){
+  var p = produkBySku(sku); if (!p) return;
+  lepas = { sku:sku, dari:dari, max:qty };
+  $('dlg-lepas-title').textContent = 'Lepas karantina — ' + displayName(p) + ' (' + sku + ', batch ' + dari + ': ' + fmtNum(qty) + ' pcs)';
+  var today = todayStr(), tujuan = batchesOf(sku).filter(function(b){ return !b.karantina && !(b.expiry && b.expiry < today); });
+  $('lp-batch').innerHTML = tujuan.map(function(b){ return '<option value="' + esc(b.batch) + '">' + esc(b.batch) + (b.expiry ? ' · exp ' + fmtTgl(b.expiry) : '') + ' · stok ' + fmtNum(b.qty) + '</option>'; }).join('') + '<option value="__baru__">Batch baru (isi kode & expiry dari kemasan)…</option>';
+  $('lp-baru').hidden = $('lp-batch').value !== '__baru__'; $('lp-batch-baru').value = ''; $('lp-expiry').value = '';
+  $('lp-qty').value = qty; $('lp-qty').max = qty; $('lp-alasan').value = ''; $('lp-err').hidden = true;
+  $('dlg-lepas').showModal(); $('lp-qty').focus();
+}
+$('lp-batch').addEventListener('change', function(){ $('lp-baru').hidden = this.value !== '__baru__'; if (this.value === '__baru__') $('lp-batch-baru').focus(); });
+document.addEventListener('click', function(e){ var b = e.target.closest('button[data-lepas]'); if (!b) return; e.preventDefault(); e.stopPropagation(); openLepas(b.dataset.lepas, b.dataset.batch, Number(b.dataset.qty)); }, true);
+$('dlg-lepas-close').addEventListener('click', function(){ $('dlg-lepas').close(); }); $('lp-batal').addEventListener('click', function(){ $('dlg-lepas').close(); });
+$('form-lepas').addEventListener('submit', function(e){
+  e.preventDefault(); var err = $('lp-err'); err.hidden = true;
+  var qty = parseInt($('lp-qty').value, 10), tujuan = $('lp-batch').value, alasan = $('lp-alasan').value.trim(), expiry = '';
+  if (!(qty > 0) || qty > lepas.max) { err.textContent = 'Jumlah harus 1 sampai ' + fmtNum(lepas.max) + '.'; err.hidden = false; return; }
+  if (tujuan === '__baru__') { tujuan = normSku($('lp-batch-baru').value); expiry = $('lp-expiry').value; if (!tujuan || tujuan === '-') { err.textContent = 'Isi kode batch tujuan.'; err.hidden = false; return; } if (!expiry) { err.textContent = 'Isi expiry batch baru dari kemasan.'; err.hidden = false; return; } if (expiry < todayStr()) { err.textContent = 'Expiry sudah lewat.'; err.hidden = false; return; } }
+  if (!tujuan) { err.textContent = 'Pilih batch tujuan.'; err.hidden = false; return; }
+  if (tujuan === lepas.dari) { err.textContent = 'Batch tujuan harus berbeda dari batch karantina.'; err.hidden = false; return; }
+  if (!alasan) { err.textContent = 'Isi kondisi / alasannya.'; err.hidden = false; return; }
+  var items = [{ sku:lepas.sku, batch:lepas.dari, qty:-qty }, { sku:lepas.sku, batch:tujuan, qty:qty, expiry:expiry || undefined }];
+  var btn = $('lp-simpan'); btn.disabled = true;
+  api('mutasi', { tipe:'ADJUST', ref:'LEPAS-KARANTINA ' + todayStr() + ' ' + new Date().toTimeString().slice(0, 5), catatan:'lepas karantina: ' + alasan, items:items, n:150 }, uid()).then(function(){
+    $('dlg-lepas').close(); toast(fmtNum(qty) + ' pcs dilepas dari karantina ke batch ' + tujuan + '.'); beep(true);
+    if (cekSku) renderCek(cekSku); renderStok();
+  }).catch(function(x){ err.textContent = x.message; err.hidden = false; beep(false); }).finally(function(){ btn.disabled = false; });
+});
 $('cek-input').addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); if (this.value.trim()) renderCek(this.value); this.value = ''; } });
 $('cek-ke-keluar').addEventListener('click', function(){ if (cekSku) { showTab('keluar'); tambahKeluar(cekSku); } });
 $('cek-ke-masuk').addEventListener('click', function(){ if (cekSku) { showTab('masuk'); bukaFormMasuk(cekSku); } });
@@ -1250,7 +1300,7 @@ function renderStok(){
     var extra = (r.nExpired ? ' <span class="badge off">' + r.nExpired + ' expired</span>' : '') + (r.nDekat ? ' <span class="badge gold">' + r.nDekat + ' hampir</span>' : '') + (r.nKar ? ' <span class="badge warn">karantina</span>' : '');
     var kt = kardusTotal(r.bs);
     return '<tr class="click" data-sku="' + esc(r.p.sku) + '"><td class="mono"><b>' + esc(r.p.sku) + '</b></td><td>' + esc(displayName(r.p)) + '</td><td class="num"><b>' + fmtNum(r.total) + '</b>' + (kt != null ? '<br><span class="muted small">' + fmtNum(kt) + ' kardus</span>' : '') + '</td><td class="num">' + fmtNum(r.p.stokMin) + '</td><td>' + badge + extra + '</td><td>' + fmtTgl(r.exp) + '</td><td class="num">' + r.bs.length + '</td></tr>' +
-      '<tr class="detail" data-for="' + esc(r.p.sku) + '" hidden><td colspan="7">' + (r.bs.length ? '<table class="sub-table"><thead><tr><th>Batch</th><th>Expiry</th><th>Sisa hari</th><th class="num">Stok</th><th>Kardus</th><th></th></tr></thead><tbody>' + r.bs.map(function(b){ return '<tr><td class="mono">' + esc(b.batch) + '</td><td>' + fmtTgl(b.expiry) + '</td><td>' + (b.hari == null ? '—' : fmtNum(b.hari)) + '</td><td class="num">' + fmtNum(b.qty) + '</td><td class="small">' + esc(fmtKardus(b.qty, b.isi) || '—') + '</td><td>' + badgeBatch(b) + '</td></tr>'; }).join('') + '</tbody></table>' : '<span class="muted small">Belum ada batch.</span>') + '</td></tr>';
+      '<tr class="detail" data-for="' + esc(r.p.sku) + '" hidden><td colspan="7">' + (r.bs.length ? '<table class="sub-table"><thead><tr><th>Batch</th><th>Expiry</th><th>Sisa hari</th><th class="num">Stok</th><th>Kardus</th><th></th></tr></thead><tbody>' + r.bs.map(function(b){ return '<tr><td class="mono">' + esc(b.batch) + '</td><td>' + fmtTgl(b.expiry) + '</td><td>' + (b.hari == null ? '—' : fmtNum(b.hari)) + '</td><td class="num">' + fmtNum(b.qty) + '</td><td class="small">' + esc(fmtKardus(b.qty, b.isi) || '—') + '</td><td>' + badgeBatch(b) + tombolLepas(r.p.sku, b) + '</td></tr>'; }).join('') + '</tbody></table>' : '<span class="muted small">Belum ada batch.</span>') + '</td></tr>';
   }).join('') || '<tr><td colspan="7" class="muted">' + (state.cache ? 'Tidak ada yang cocok.' : 'Belum ada data — sambungkan ke server di Pengaturan.') + '</td></tr>';
 }
 $('stok-cari').addEventListener('input', renderStok); $('stok-masalah').addEventListener('change', renderStok);
